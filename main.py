@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from core.config import Settings
 from api.routes import router
 
 
@@ -15,7 +15,7 @@ app.add_middleware(
     allow_origins=[
         "http://127.0.0.1:5500",
         "http://localhost:5500",
-        "https://web-production-40ead.up.railway.app"
+        Settings().ACCOUNTS_API_URL
     ],
     allow_credentials=True,
     allow_methods=["*"],
