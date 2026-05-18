@@ -13,60 +13,67 @@ class Service:
 
     def analyze(self, data: dict):
         token = data.get("token")
-        conversation_id = data.get("conversation_id")
         question = data.get("question")
-        dataset = data.get("dataset", [])
+        dataset = data.get("dataset")
 
         if not token:
             raise ValueError("token is required")
 
-        if not conversation_id:
-            raise ValueError("conversation_id is required")
-
         if not question:
             raise ValueError("question is required")
 
-        if not isinstance(dataset, list):
+        if dataset is not None and not isinstance(dataset, list):
             raise ValueError("dataset must be a list")
 
         if not self.accounts.valid_token(token):
             raise ValueError("invalid token")
 
-        messages = self.accounts.get_messages(
-            token=token,
-            conversation_id=conversation_id
-        )
+        messages = self.accounts.get_user_conversations(token=token)
 
-        columns = list(dataset[0].keys()) if dataset else []
+        if dataset:
+            columns = list(dataset[0].keys())
 
-        interpretation = self.interpreter.run(
-            question=question,
-            columns=columns,
-            messages=messages
-        )
+            interpretation = self.interpreter.run(
+                question=question,
+                columns=columns,
+                messages=messages
+            )
 
-        chart = {
-            "type": "none",
-            "x": None,
-            "y": None,
-            "data": []
-        }
+            chart = {
+                "type": "none",
+                "x": None,
+                "y": None,
+                "data": []
+            }
 
-        if interpretation.get("mode") == "analysis":
-            chart = self.analyzer.run(
-                dataset=dataset,
+            if interpretation.get("mode") == "analysis":
+                chart = self.analyzer.run(
+                    dataset=dataset,
+                    interpretation=interpretation
+                )
+
+            answer = self.generator.run(
+                question=question,
+                chart=chart,
+                messages=messages,
                 interpretation=interpretation
             )
 
+            return {
+                "answer": answer,
+                "chart": chart,
+                "interpretation": interpretation
+            }
+
         answer = self.generator.run(
             question=question,
-            chart=chart,
+            chart=None,
             messages=messages,
-            interpretation=interpretation
+            interpretation=None
         )
 
         return {
             "answer": answer,
-            "chart": chart,
-            "interpretation": interpretation
+            "chart": None,
+            "interpretation": None
         }

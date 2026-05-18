@@ -2,7 +2,9 @@ import pandas as pd
 
 
 class Analyzer:
-    def run(self, dataset: list[dict], interpretation: dict):
+    def run(self, dataset: list[dict], interpretation: dict | None):
+        interpretation = interpretation or {}
+
         if not dataset:
             return {
                 "type": "none",

@@ -1,23 +1,25 @@
 import json
 from openai import OpenAI
-from core.config import settings
+from core.config import Settings
 
 
 class Generator:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = settings.OPENAI_MODEL
+        self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
+        self.model = Settings.OPENAI_MODEL
 
     def run(
         self,
         question: str,
-        chart: dict,
+        chart: dict | None,
         messages: list,
-        interpretation: dict
+        interpretation: dict | None
     ) -> str:
 
         has_data = (
-            chart.get("type") != "none"
+            chart is not None
+            and interpretation is not None
+            and chart.get("type") != "none"
             and bool(chart.get("data"))
             and interpretation.get("mode") == "analysis"
         )
@@ -32,8 +34,7 @@ class Generator:
         else:
             prompt = self._chat_prompt(
                 question=question,
-                messages=messages,
-                interpretation=interpretation
+                messages=messages
             )
 
         response = self.client.responses.create(
@@ -46,13 +47,12 @@ class Generator:
     def _chat_prompt(
         self,
         question: str,
-        messages: list,
-        interpretation: dict
+        messages: list
     ) -> str:
         return f"""
 Você é um assistente útil, direto e inteligente.
 
-Neste momento não existem dados suficientes para análise de dados.
+Neste momento não existem dados enviados para análise.
 Responda como conversa normal, sem tentar criar gráfico ou inventar informações.
 
 REGRAS:
@@ -61,16 +61,13 @@ REGRAS:
 - Não invente dados.
 - Não invente colunas.
 - Não finja que analisou um dataset.
-- Se o usuário pediu análise, explique que precisa de dados/arquivo/dataset para analisar.
+- Se o usuário pediu análise, explique que precisa de um arquivo/dataset para analisar.
 - Se a pergunta for comum, responda naturalmente.
 - Não use JSON.
 - Não use markdown pesado.
 
 Pergunta:
 {question}
-
-Interpretação:
-{json.dumps(interpretation, ensure_ascii=False)}
 
 Histórico:
 {json.dumps(messages, ensure_ascii=False)}

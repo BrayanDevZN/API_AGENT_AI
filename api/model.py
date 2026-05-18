@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
@@ -19,5 +20,5 @@ class AnalyzeJsonRequest(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     answer: str
-    chart: dict
-    interpretation: dict
+    chart: Optional[dict] = None
+    interpretation: Optional[dict] = None
