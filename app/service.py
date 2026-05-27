@@ -83,12 +83,12 @@ class Service:
         conversation_id = data["conversation_id"]
         question = data["question"]
 
-        valid = self.accounts_client.valid_token(token)
+        valid = self.accounts.valid_token(token)
 
         if not valid:
             raise Exception("Token inválido.")
 
-        messages = self.accounts_client.get_messages(
+        messages = self.accounts.get_messages(
             token=token,
             conversation_id=conversation_id
         )
