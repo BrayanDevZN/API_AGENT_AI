@@ -6,12 +6,16 @@ from app.data_cleaner import DataCleaner
 from app.data_profiler import DataProfiler
 from app.pandas_tools import PandasTools
 
+
 class Service:
     def __init__(self):
         self.accounts = AccountsClient()
         self.interpreter = Interpreter()
         self.analyzer = Analyzer()
         self.generator = Generator()
+        self.cleaner = DataCleaner()
+        self.profiler = DataProfiler()
+        self.pandas_tools = PandasTools()
 
     def analyze(self, data: dict):
         token = data.get("token")
