@@ -82,10 +82,11 @@ class PandasTools:
         aggregation: str,
         time_freq: str
     ) -> list[dict]:
-        if time_column not in df.columns:
+        if not time_column or time_column not in df.columns:
             raise ValueError(f"Coluna de tempo inválida: {time_column}")
 
         temp_df = df.copy()
+
         temp_df[time_column] = pd.to_datetime(
             temp_df[time_column],
             errors="coerce"
@@ -96,13 +97,17 @@ class PandasTools:
         if temp_df.empty:
             raise ValueError("Nenhuma data válida encontrada.")
 
-        temp_df["periodo"] = temp_df[time_column].dt.to_period(time_freq).astype(str)
+        temp_df["periodo"] = (
+            temp_df[time_column]
+            .dt.to_period(time_freq)
+            .astype(str)
+        )
 
         if aggregation == "count":
             result = (
                 temp_df.groupby("periodo")
                 .size()
-                .reset_index(name="count")
+                .reset_index(name="value")
                 .sort_values("periodo")
             )
 
@@ -114,7 +119,7 @@ class PandasTools:
         result = (
             temp_df.groupby("periodo")[metric]
             .agg(aggregation)
-            .reset_index()
+            .reset_index(name="value")
             .sort_values("periodo")
         )
 
