@@ -157,3 +157,49 @@ DADOS/GRÁFICO ANALISADO:
 
 Resposta:
 """
+    def dashboard_analysis(
+        self,
+        prompt: str,
+        plan: dict,
+        metrics: list[dict],
+        schema: dict
+    ) -> str:
+        final_prompt = f"""
+    Você é o DataPilot AI, uma IA especialista em análise de dados e dashboards.
+
+    Sua função é analisar métricas já calculadas pelo pandas.
+    Você NÃO deve inventar dados.
+    Você NÃO deve inventar colunas.
+    Você deve usar apenas os dados fornecidos.
+
+    REGRAS:
+    - Responda em português.
+    - Seja claro e profissional.
+    - Explique o que o gráfico mostra.
+    - Destaque maiores valores, menores valores, concentração, tendência ou distribuição.
+    - Trate causas como hipóteses, não como certeza.
+    - Dê recomendações práticas.
+    - Não use JSON.
+    - Não use markdown pesado.
+
+    Pedido do usuário:
+    {prompt}
+
+    Plano usado:
+    {json.dumps(plan, ensure_ascii=False)}
+
+    Schema do dataset:
+    {json.dumps(schema, ensure_ascii=False)}
+
+    Métricas calculadas:
+    {json.dumps(metrics, ensure_ascii=False)}
+
+    Resposta:
+    """
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=final_prompt
+        )
+
+        return response.output_text

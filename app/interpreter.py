@@ -266,3 +266,99 @@ Histórico:
                 "mode": "chat",
                 "reason": "json_invalido"
             }
+            
+    def _safe_dashboard_plan(self, output_text: str) -> dict:
+        try:
+            data = json.loads(output_text)
+
+            valid_operations = ["groupby", "count"]
+            valid_aggregations = ["sum", "mean", "count", "max", "min"]
+            valid_chart_types = ["bar", "line", "pie", "scatter"]
+
+            operation = data.get("operation", "count")
+            aggregation = data.get("aggregation", "count")
+            chart_type = data.get("chart_type", "bar")
+
+            if operation not in valid_operations:
+                operation = "count"
+
+            if aggregation not in valid_aggregations:
+                aggregation = "count"
+
+            if chart_type not in valid_chart_types:
+                chart_type = "bar"
+
+            return {
+                "operation": operation,
+                "group_by": data.get("group_by"),
+                "metric": data.get("metric"),
+                "aggregation": aggregation,
+                "chart_type": chart_type,
+                "title": data.get("title", "Dashboard gerado"),
+                "x": data.get("x") or data.get("group_by"),
+                "y": data.get("y") or data.get("metric") or "count"
+            }
+
+        except Exception:
+            return {
+                "operation": "count",
+                "group_by": None,
+                "metric": None,
+                "aggregation": "count",
+                "chart_type": "bar",
+                "title": "Dashboard gerado",
+                "x": None,
+                "y": "count"
+            }
+            
+    def dashboard_plan(self, prompt: str, schema: dict) -> dict:
+        system_prompt = """
+    Você é um planejador de análise de dados.
+
+    Sua função é escolher uma operação pandas simples para gerar um gráfico.
+    Você receberá o pedido do usuário e o schema do dataset.
+
+    Responda SOMENTE em JSON válido.
+    Não use markdown.
+    Não explique.
+
+    Formato obrigatório:
+    {
+    "operation": "groupby | count",
+    "group_by": "nome_da_coluna",
+    "metric": "nome_da_coluna_ou_null",
+    "aggregation": "sum | mean | count | max | min",
+    "chart_type": "bar | line | pie | scatter",
+    "title": "Título do gráfico",
+    "x": "coluna_eixo_x",
+    "y": "coluna_eixo_y"
+    }
+
+    REGRAS:
+    - Use apenas colunas existentes no schema.
+    - Não invente colunas.
+    - Se não houver métrica numérica clara, use operation "count".
+    - Para ranking, comparação ou total por categoria, use groupby.
+    - Para quantidade por categoria, use count.
+    - Para evolução temporal, use line.
+    - Para proporção, use pie.
+    - Para comparação comum, use bar.
+    """
+
+        user_prompt = f"""
+    Pedido do usuário:
+    {prompt}
+
+    Schema:
+    {json.dumps(schema, ensure_ascii=False)}
+    """
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+
+        return self._safe_dashboard_plan(response.output_text)

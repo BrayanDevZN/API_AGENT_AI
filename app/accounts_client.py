@@ -54,3 +54,56 @@ class AccountsClient:
             return data
 
         return data.get("messages", [])
+    
+    def create_dashboard(
+        self,
+        token: str,
+        title: str,
+        prompt: str,
+        ai_suggestion: str | None,
+        file_name: str | None
+    ) -> dict | None:
+        res = requests.post(
+            f"{self.base_url}/dashboard/create",
+            json={
+                "token": token,
+                "title": title,
+                "prompt": prompt,
+                "ai_suggestion": ai_suggestion,
+                "file_name": file_name
+            },
+            timeout=settings.TIMEOUT
+        )
+
+        if res.status_code not in (200, 201):
+            return None
+
+        return res.json().get("dashboard")
+
+
+    def create_dashboard_chart(
+        self,
+        dashboard_id: int,
+        chart_type: str,
+        title: str,
+        chart_data: list[dict],
+        chart_config: dict | None = None
+    ) -> dict | None:
+        res = requests.post(
+            f"{self.base_url}/dashboard/chart/create",
+            json={
+                "dashboard_id": dashboard_id,
+                "chart_type": chart_type,
+                "title": title,
+                "chart_data": {
+                    "data": chart_data
+                },
+                "chart_config": chart_config
+            },
+            timeout=settings.TIMEOUT
+        )
+
+        if res.status_code not in (200, 201):
+            return None
+
+        return res.json().get("chart")

@@ -2,7 +2,9 @@ from app.accounts_client import AccountsClient
 from app.interpreter import Interpreter
 from app.analyzer import Analyzer
 from app.generator import Generator
-
+from app.data_cleaner import DataCleaner
+from app.data_profiler import DataProfiler
+from app.pandas_tools import PandasTools
 
 class Service:
     def __init__(self):
@@ -100,4 +102,68 @@ class Service:
 
         return {
             "answer": answer
+        }
+        
+    def generate_dashboard(self, data: dict) -> dict:
+        token = data["token"]
+        title = data["title"]
+        prompt = data["prompt"]
+        dataset = data["dataset"]
+        file_name = data.get("file_name")
+
+        if not self.accounts.valid_token(token):
+            raise ValueError("Token inválido.")
+
+        df = self.cleaner.clean(dataset)
+
+        schema = self.profiler.profile(df)
+
+        plan = self.interpreter.dashboard_plan(
+            prompt=prompt,
+            schema=schema
+        )
+
+        metrics = self.pandas_tools.execute(
+            df=df,
+            plan=plan
+        )
+
+        ai_suggestion = self.generator.dashboard_analysis(
+            prompt=prompt,
+            plan=plan,
+            metrics=metrics,
+            schema=schema
+        )
+
+        dashboard = self.accounts.create_dashboard(
+            token=token,
+            title=title,
+            prompt=prompt,
+            ai_suggestion=ai_suggestion,
+            file_name=file_name
+        )
+
+        if not dashboard:
+            raise ValueError("Erro ao salvar dashboard.")
+
+        chart = self.accounts.create_dashboard_chart(
+            dashboard_id=dashboard["id"],
+            chart_type=plan["chart_type"],
+            title=plan["title"],
+            chart_data=metrics,
+            chart_config={
+                "x": plan["x"],
+                "y": plan["y"],
+                "aggregation": plan["aggregation"],
+                "operation": plan["operation"]
+            }
+        )
+
+        if not chart:
+            raise ValueError("Erro ao salvar gráfico.")
+
+        return {
+            "dashboard": dashboard,
+            "charts": [chart],
+            "ai_suggestion": ai_suggestion
         }
