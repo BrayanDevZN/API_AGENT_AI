@@ -4,7 +4,7 @@ from core.config import settings
 
 class AccountsClient:
     def __init__(self):
-        self.base_url = settings.ACCOUNTS_API_URL
+        self.base_url = settings.ACCOUNTS_API_URL.rstrip("/")
 
     def valid_token(self, token: str) -> bool:
         res = requests.post(
@@ -17,12 +17,16 @@ class AccountsClient:
             return False
 
         data = res.json()
-        return data.get("is_valid") is True
+
+        return (
+            data.get("is_valid") is True
+            or data.get("status") is True
+        )
 
     def get_user_conversations(self, token: str) -> list:
         res = requests.post(
             f"{self.base_url}/conversation/user",
-            json=token,
+            json={"token": token},
             timeout=settings.TIMEOUT
         )
 
@@ -31,7 +35,7 @@ class AccountsClient:
 
         return res.json()
 
-    def get_messages(self, token: str, conversation_id: int):
+    def get_messages(self, token: str, conversation_id: int) -> list:
         res = requests.post(
             f"{self.base_url}/conversation/messages",
             json={
@@ -44,4 +48,9 @@ class AccountsClient:
         if res.status_code != 200:
             return []
 
-        return res.json()
+        data = res.json()
+
+        if isinstance(data, list):
+            return data
+
+        return data.get("messages", [])

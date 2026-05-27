@@ -1,46 +1,21 @@
-from fastapi import (
-    APIRouter,
-    UploadFile,
-    File,
-    Form,
-    HTTPException
-)
+from fastapi import APIRouter, HTTPException
 
 from app.manager import Manager
-from app.file_reader import FileReader
-
-from api.model import AnalyzeResponse
+from api.model import ChatRequest, ChatResponse
 
 
 router = APIRouter()
 
 manager = Manager()
-reader = FileReader()
 
 
 @router.post(
     "/chat",
-    response_model=AnalyzeResponse
+    response_model=ChatResponse
 )
-async def chat(
-    token: str = Form(...),
-    question: str = Form(...),
-    file: UploadFile | None = File(None)
-):
+def chat(data: ChatRequest):
     try:
-        dataset = None
-
-        if file is not None:
-            dataset = await reader.read(file)
-
-        data = {
-            "token": token,
-            "question": question,
-            "dataset": dataset
-        }
-
-        result = manager.analyze(data)
-
+        result = manager.chat(data.model_dump())
         return result
 
     except Exception as error:

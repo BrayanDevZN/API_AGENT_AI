@@ -77,3 +77,27 @@ class Service:
             "chart": None,
             "interpretation": None
         }
+        
+    def chat(self, data: dict) -> dict:
+        token = data["token"]
+        conversation_id = data["conversation_id"]
+        question = data["question"]
+
+        valid = self.accounts_client.valid_token(token)
+
+        if not valid:
+            raise Exception("Token inválido.")
+
+        messages = self.accounts_client.get_messages(
+            token=token,
+            conversation_id=conversation_id
+        )
+
+        answer = self.generator.chat(
+            question=question,
+            messages=messages
+        )
+
+        return {
+            "answer": answer
+        }

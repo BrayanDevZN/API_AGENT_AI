@@ -22,3 +22,18 @@ class AnalyzeResponse(BaseModel):
     answer: str
     chart: Optional[dict] = None
     interpretation: Optional[dict] = None
+    
+    
+
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str
+    conversation_id: int = Field(gt=0)
+    question: str = Field(min_length=1)
+
+
+class ChatResponse(BaseModel):
+    answer: str
