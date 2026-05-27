@@ -8,18 +8,9 @@ class Interpreter:
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = settings.OPENAI_MODEL
 
-    def run(
-        self,
-        question: str,
-        columns: list[str],
-        messages: list
-    ) -> dict:
-
+    def run(self, question: str, columns: list[str], messages: list) -> dict:
         if not columns:
-            prompt = self._chat_prompt(
-                question=question,
-                messages=messages
-            )
+            prompt = self._chat_prompt(question=question, messages=messages)
         else:
             prompt = self._analysis_prompt(
                 question=question,
@@ -33,6 +24,70 @@ class Interpreter:
         )
 
         return self._safe_json(response.output_text)
+
+    def dashboard_plan(self, prompt: str, schema: dict) -> dict:
+        system_prompt = """
+Você é um planejador de análise de dados.
+
+Sua função é escolher uma operação pandas simples para gerar um gráfico.
+Você receberá o pedido do usuário e o schema do dataset.
+
+Responda SOMENTE em JSON válido.
+Não use markdown.
+Não explique.
+
+Formato obrigatório:
+{
+  "operation": "groupby | count | time_groupby",
+  "group_by": "nome_da_coluna_ou_null",
+  "metric": "nome_da_coluna_ou_null",
+  "aggregation": "sum | mean | count | max | min",
+  "chart_type": "bar | line | pie | scatter",
+  "title": "Título do gráfico",
+  "x": "coluna_eixo_x",
+  "y": "coluna_eixo_y",
+  "time_column": "coluna_de_data_ou_null",
+  "time_freq": "D | M | Y"
+}
+
+REGRAS:
+- Use apenas colunas existentes no schema.
+- Não invente colunas.
+- Não altere o nome das colunas.
+- Se uma coluna tiver acento, espaço, underline ou letra maiúscula, copie exatamente como está.
+- Para "mais usado", "mais comum", "mais frequente", "quantidade por", "contagem por", use aggregation "count".
+- aggregation "count" pode ser usada em colunas de texto/categoria.
+- Para count, metric deve ser null.
+- Para count, group_by deve ser a coluna categórica analisada.
+- Para ranking, comparação ou total por categoria com valor numérico, use operation "groupby".
+- Para quantidade por categoria sem valor numérico, use operation "count".
+- Para análise por tempo, mês, dia, ano, evolução, tendência, período ou data, use operation "time_groupby".
+- Para time_groupby, use uma coluna de data em time_column.
+- Para análise mensal, use time_freq "M".
+- Para análise diária, use time_freq "D".
+- Para análise anual, use time_freq "Y".
+- Para evolução temporal, use chart_type "line".
+- Para proporção, use chart_type "pie".
+- Para comparação comum, use chart_type "bar".
+"""
+
+        user_prompt = f"""
+Pedido do usuário:
+{prompt}
+
+Schema:
+{json.dumps(schema, ensure_ascii=False)}
+"""
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+
+        return self._safe_dashboard_plan(response.output_text)
 
     def _chat_prompt(self, question: str, messages: list) -> str:
         return f"""
@@ -48,7 +103,6 @@ Não explique.
 Não escreva texto fora do JSON.
 
 Formato obrigatório:
-
 {{
   "chart_type": "none",
   "x": null,
@@ -58,15 +112,6 @@ Formato obrigatório:
   "reason": "sem_dataset"
 }}
 
-Regras:
-- Como não existe dataset, SEMPRE use chart_type "none".
-- Como não existem colunas, SEMPRE use x null e y null.
-- Como não há dados para agregar, SEMPRE use aggregation "none".
-- Não invente colunas.
-- Não tente criar gráfico.
-- Não tente inferir dados pelo histórico.
-- Mesmo que o usuário peça gráfico, responda como sem_dataset.
-
 Pergunta do usuário:
 {question}
 
@@ -74,24 +119,14 @@ Histórico:
 {json.dumps(messages, ensure_ascii=False)}
 """
 
-    def _analysis_prompt(
-        self,
-        question: str,
-        columns: list[str],
-        messages: list
-    ) -> str:
+    def _analysis_prompt(self, question: str, columns: list[str], messages: list) -> str:
         return f"""
 Você é um interpretador especialista em análise de dados.
 
-Sua função é transformar a pergunta do usuário em uma estrutura JSON que será usada por um sistema Python com pandas.
-
 Responda SOMENTE em JSON válido.
 Não use markdown.
-Não explique.
-Não escreva texto fora do JSON.
 
 Formato obrigatório:
-
 {{
   "chart_type": "bar | line | pie | scatter | none",
   "x": "nome_da_coluna_ou_null",
@@ -101,112 +136,13 @@ Formato obrigatório:
   "reason": "explicacao_curta"
 }}
 
-Regras gerais:
-- Use apenas colunas existentes na lista de colunas disponíveis.
+Regras:
+- Use apenas colunas existentes.
 - Não invente colunas.
-- Não altere nomes das colunas.
-- Se uma coluna tiver acento, espaço ou letra maiúscula, copie exatamente como está.
-- Se a pergunta não for sobre análise de dados, use chart_type "none" e mode "chat".
-- Se a pergunta for ambígua ou impossível com as colunas existentes, use chart_type "none".
-- Se faltar uma coluna necessária para responder, use chart_type "none".
-- O campo reason deve ser curto e objetivo.
-
-Tipos de gráfico:
-- "bar": comparação entre categorias, ranking, maiores/menores, total por grupo.
-- "line": evolução no tempo, tendência, crescimento, queda por data.
-- "pie": proporção, participação percentual, distribuição simples.
-- "scatter": relação entre duas variáveis numéricas.
-- "none": conversa comum, pergunta impossível, falta de dados ou falta de colunas.
-
-Agregações:
-- "count": contar registros, frequência, quantidade por categoria.
-- "sum": somar valores.
-- "mean": calcular média.
-- "max": maior valor.
-- "min": menor valor.
-- "none": sem agregação.
-
-Regras para escolher x:
-- x normalmente é a coluna categórica ou temporal.
-- Para ranking por produto, x deve ser produto.
-- Para vendas por cidade, x deve ser cidade.
-- Para evolução no tempo, x deve ser data.
-- Para contagem por categoria, x deve ser a categoria.
-
-Regras para escolher y:
-- y normalmente é a coluna numérica.
-- Para soma, média, máximo ou mínimo, y deve ser uma coluna numérica.
 - Para count, y deve ser null.
-- Se não existir coluna numérica adequada, use chart_type "none".
-
-Exemplos:
+- Se for conversa comum, use chart_type "none".
 
 Pergunta:
-"qual produto vendeu mais?"
-
-Resposta:
-{{
-  "chart_type": "bar",
-  "x": "produto",
-  "y": "vendas",
-  "aggregation": "sum",
-  "mode": "analysis",
-  "reason": "ranking_por_produto"
-}}
-
-Pergunta:
-"quantos clientes existem por cidade?"
-
-Resposta:
-{{
-  "chart_type": "bar",
-  "x": "cidade",
-  "y": null,
-  "aggregation": "count",
-  "mode": "analysis",
-  "reason": "contagem_por_categoria"
-}}
-
-Pergunta:
-"qual foi a evolução das vendas por mês?"
-
-Resposta:
-{{
-  "chart_type": "line",
-  "x": "mes",
-  "y": "vendas",
-  "aggregation": "sum",
-  "mode": "analysis",
-  "reason": "evolucao_temporal"
-}}
-
-Pergunta:
-"qual a porcentagem de vendas por região?"
-
-Resposta:
-{{
-  "chart_type": "pie",
-  "x": "regiao",
-  "y": "vendas",
-  "aggregation": "sum",
-  "mode": "analysis",
-  "reason": "proporcao_por_categoria"
-}}
-
-Pergunta:
-"oi, tudo bem?"
-
-Resposta:
-{{
-  "chart_type": "none",
-  "x": null,
-  "y": null,
-  "aggregation": "none",
-  "mode": "chat",
-  "reason": "conversa_comum"
-}}
-
-Pergunta do usuário:
 {question}
 
 Colunas disponíveis:
@@ -227,17 +163,13 @@ Histórico:
             mode = data.get("mode", "chat")
             reason = data.get("reason", "")
 
-            valid_chart_types = ["bar", "line", "pie", "scatter", "none"]
-            valid_aggregations = ["sum", "mean", "count", "max", "min", "none"]
-            valid_modes = ["analysis", "chat"]
-
-            if chart_type not in valid_chart_types:
+            if chart_type not in ["bar", "line", "pie", "scatter", "none"]:
                 chart_type = "none"
 
-            if aggregation not in valid_aggregations:
+            if aggregation not in ["sum", "mean", "count", "max", "min", "none"]:
                 aggregation = "none"
 
-            if mode not in valid_modes:
+            if mode not in ["analysis", "chat"]:
                 mode = "chat"
 
             if chart_type == "none":
@@ -266,27 +198,34 @@ Histórico:
                 "mode": "chat",
                 "reason": "json_invalido"
             }
-            
+
     def _safe_dashboard_plan(self, output_text: str) -> dict:
         try:
             data = json.loads(output_text)
 
-            valid_operations = ["groupby", "count"]
-            valid_aggregations = ["sum", "mean", "count", "max", "min"]
-            valid_chart_types = ["bar", "line", "pie", "scatter"]
-
             operation = data.get("operation", "count")
             aggregation = data.get("aggregation", "count")
             chart_type = data.get("chart_type", "bar")
+            time_freq = data.get("time_freq", "M")
 
-            if operation not in valid_operations:
+            if operation not in ["groupby", "count", "time_groupby"]:
                 operation = "count"
 
-            if aggregation not in valid_aggregations:
+            if aggregation not in ["sum", "mean", "count", "max", "min"]:
                 aggregation = "count"
 
-            if chart_type not in valid_chart_types:
+            if chart_type not in ["bar", "line", "pie", "scatter"]:
                 chart_type = "bar"
+
+            if time_freq not in ["D", "M", "Y"]:
+                time_freq = "M"
+
+            if operation == "count":
+                data["metric"] = None
+                aggregation = "count"
+
+            if operation == "time_groupby":
+                chart_type = "line"
 
             return {
                 "operation": operation,
@@ -295,8 +234,10 @@ Histórico:
                 "aggregation": aggregation,
                 "chart_type": chart_type,
                 "title": data.get("title", "Dashboard gerado"),
-                "x": data.get("x") or data.get("group_by"),
-                "y": data.get("y") or data.get("metric") or "count"
+                "x": data.get("x") or data.get("group_by") or "periodo",
+                "y": data.get("y") or data.get("metric") or "count",
+                "time_column": data.get("time_column"),
+                "time_freq": time_freq
             }
 
         except Exception:
@@ -308,57 +249,7 @@ Histórico:
                 "chart_type": "bar",
                 "title": "Dashboard gerado",
                 "x": None,
-                "y": "count"
+                "y": "count",
+                "time_column": None,
+                "time_freq": "M"
             }
-            
-    def dashboard_plan(self, prompt: str, schema: dict) -> dict:
-        system_prompt = """
-    Você é um planejador de análise de dados.
-
-    Sua função é escolher uma operação pandas simples para gerar um gráfico.
-    Você receberá o pedido do usuário e o schema do dataset.
-
-    Responda SOMENTE em JSON válido.
-    Não use markdown.
-    Não explique.
-
-    Formato obrigatório:
-    {
-    "operation": "groupby | count",
-    "group_by": "nome_da_coluna",
-    "metric": "nome_da_coluna_ou_null",
-    "aggregation": "sum | mean | count | max | min",
-    "chart_type": "bar | line | pie | scatter",
-    "title": "Título do gráfico",
-    "x": "coluna_eixo_x",
-    "y": "coluna_eixo_y"
-    }
-
-    REGRAS:
-    - Use apenas colunas existentes no schema.
-    - Não invente colunas.
-    - Se não houver métrica numérica clara, use operation "count".
-    - Para ranking, comparação ou total por categoria, use groupby.
-    - Para quantidade por categoria, use count.
-    - Para evolução temporal, use line.
-    - Para proporção, use pie.
-    - Para comparação comum, use bar.
-    """
-
-        user_prompt = f"""
-    Pedido do usuário:
-    {prompt}
-
-    Schema:
-    {json.dumps(schema, ensure_ascii=False)}
-    """
-
-        response = self.client.responses.create(
-            model=self.model,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-        )
-
-        return self._safe_dashboard_plan(response.output_text)
