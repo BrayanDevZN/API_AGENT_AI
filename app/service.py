@@ -83,7 +83,7 @@ class Service:
             "chart": None,
             "interpretation": None
         }
-        
+
     def chat(self, data: dict) -> dict:
         token = data["token"]
         conversation_id = data["conversation_id"]
@@ -107,7 +107,7 @@ class Service:
         return {
             "answer": answer
         }
-        
+
     def generate_dashboard(self, data: dict) -> dict:
         token = data["token"]
         title = data["title"]
@@ -151,17 +151,17 @@ class Service:
             raise ValueError("Erro ao salvar dashboard.")
 
         chart = self.accounts.create_dashboard_chart(
-    dashboard_id=dashboard["id"],
-    chart_type=plan["chart_type"],
-    title=plan["title"],
-    chart_data=metrics,
-    chart_config={
-        "x": "periodo" if plan["operation"] == "time_groupby" else plan["x"],
-        "y": "value" if plan["operation"] == "time_groupby" else plan["y"],
-        "aggregation": plan["aggregation"],
-        "operation": plan["operation"]
-    }
-)
+            dashboard_id=dashboard["id"],
+            chart_type=plan["chart_type"],
+            title=plan["title"],
+            chart_data=metrics,
+            chart_config={
+                "x": "label" if plan["operation"] == "time_groupby" else plan["x"],
+                "y": "value" if plan["operation"] == "time_groupby" else plan["y"],
+                "aggregation": plan["aggregation"],
+                "operation": plan["operation"]
+            }
+        )
 
         if not chart:
             raise ValueError("Erro ao salvar gráfico.")

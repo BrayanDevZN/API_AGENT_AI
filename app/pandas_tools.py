@@ -48,31 +48,53 @@ class PandasTools:
 
         return result.to_dict(orient="records")
 
+    def _normalize_group_by(self, group_by) -> list[str]:
+        if isinstance(group_by, str):
+            return [group_by]
+
+        if isinstance(group_by, list):
+            return group_by
+
+        raise ValueError(f"group_by inválido: {group_by}")
+
+
     def _groupby(
-        self,
-        df,
-        group_by: str,
-        metric: str | None,
-        aggregation: str
-    ) -> list[dict]:
-        if group_by not in df.columns:
-            raise ValueError(f"Coluna group_by inválida: {group_by}")
+            self,
+            df,
+            group_by,
+            metric: str | None,
+            aggregation: str
+        ) -> list[dict]:
+            group_columns = self._normalize_group_by(group_by)
 
-        if aggregation == "count":
-            return self._count(df=df, group_by=group_by)
+            for column in group_columns:
+                if column not in df.columns:
+                    raise ValueError(f"Coluna group_by inválida: {column}")
 
-        if not metric or metric not in df.columns:
-            raise ValueError(f"Coluna metric inválida: {metric}")
+            if aggregation == "count":
+                result = (
+                    df.groupby(group_columns)
+                    .size()
+                    .reset_index(name="value")
+                    .sort_values("value", ascending=False)
+                    .head(20)
+                )
 
-        result = (
-            df.groupby(group_by)[metric]
-            .agg(aggregation)
-            .reset_index()
-            .sort_values(metric, ascending=False)
-            .head(20)
-        )
+                return result.to_dict(orient="records")
 
-        return result.to_dict(orient="records")
+            if not metric or metric not in df.columns:
+                raise ValueError(f"Coluna metric inválida: {metric}")
+
+            result = (
+                df.groupby(group_columns)[metric]
+                .agg(aggregation)
+                .reset_index(name="value")
+                .sort_values("value", ascending=False)
+                .head(20)
+            )
+
+            return result.to_dict(orient="records")
+
 
     def _time_groupby(
         self,
@@ -80,7 +102,8 @@ class PandasTools:
         time_column: str,
         metric: str | None,
         aggregation: str,
-        time_freq: str
+        time_freq: str,
+        group_by=None
     ) -> list[dict]:
         if not time_column or time_column not in df.columns:
             raise ValueError(f"Coluna de tempo inválida: {time_column}")
@@ -103,24 +126,40 @@ class PandasTools:
             .astype(str)
         )
 
+        group_columns = ["periodo"]
+
+        if group_by:
+            extra_groups = self._normalize_group_by(group_by)
+
+            for column in extra_groups:
+                if column not in temp_df.columns:
+                    raise ValueError(f"Coluna group_by inválida: {column}")
+
+            group_columns.extend(extra_groups)
+
         if aggregation == "count":
             result = (
-                temp_df.groupby("periodo")
+                temp_df.groupby(group_columns)
                 .size()
                 .reset_index(name="value")
                 .sort_values("periodo")
+                .head(20)
+            )
+        else:
+            if not metric or metric not in temp_df.columns:
+                raise ValueError(f"Coluna metric inválida: {metric}")
+
+            result = (
+                temp_df.groupby(group_columns)[metric]
+                .agg(aggregation)
+                .reset_index(name="value")
+                .sort_values("periodo")
+                .head(20)
             )
 
-            return result.to_dict(orient="records")
-
-        if not metric or metric not in temp_df.columns:
-            raise ValueError(f"Coluna metric inválida: {metric}")
-
-        result = (
-            temp_df.groupby("periodo")[metric]
-            .agg(aggregation)
-            .reset_index(name="value")
-            .sort_values("periodo")
-        )
+        if len(group_columns) > 1:
+            result["label"] = result[group_columns].astype(str).agg(" - ".join, axis=1)
+        else:
+            result["label"] = result["periodo"].astype(str)
 
         return result.to_dict(orient="records")
