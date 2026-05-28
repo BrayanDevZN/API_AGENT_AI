@@ -3,15 +3,35 @@ import pandas as pd
 
 class PandasTools:
     def execute(self, df, plan: dict) -> list[dict]:
+        rename_columns = plan.get("rename_columns", {})
+
+        df = self.rename_columns_df(
+            df=df,
+            rename_map=rename_columns
+        )
+
         operation = plan.get("operation")
-        group_by = plan.get("group_by")
-        metric = plan.get("metric")
-        aggregation = plan.get("aggregation", "count")
+
+        group_by = self._normalize_list(
+            plan.get("group_by")
+        )
+
+        metric = self._normalize_list(
+            plan.get("metric")
+        )
+
+        aggregation = self._normalize_list(
+            plan.get("aggregation", ["count"])
+        )
+
         time_column = plan.get("time_column")
         time_freq = plan.get("time_freq", "M")
 
         if operation == "count":
-            return self._count(df=df, group_by=group_by)
+            return self._count(
+                df=df,
+                group_by=group_by
+            )
 
         if operation == "groupby":
             return self._groupby(
@@ -27,86 +47,153 @@ class PandasTools:
                 time_column=time_column,
                 metric=metric,
                 aggregation=aggregation,
-                time_freq=time_freq
+                time_freq=time_freq,
+                group_by=group_by
             )
 
         raise ValueError("Operação não suportada.")
 
-    def _count(self, df, group_by: str) -> list[dict]:
-        if group_by not in df.columns:
-            raise ValueError(f"Coluna group_by inválida: {group_by}")
+    def _normalize_list(self, value) -> list:
+        if value is None:
+            return []
+
+        if isinstance(value, list):
+            return value
+
+        return [value]
+
+    def _validate_columns(
+        self,
+        df,
+        columns: list[str],
+        label: str
+    ) -> None:
+        for column in columns:
+            if column not in df.columns:
+                raise ValueError(
+                    f"Coluna {label} inválida: {column}"
+                )
+
+    def _flatten_columns(
+        self,
+        result: pd.DataFrame
+    ) -> pd.DataFrame:
+        result.columns = [
+            "_".join(
+                [str(part) for part in col if part]
+            )
+            if isinstance(col, tuple)
+            else str(col)
+            for col in result.columns
+        ]
+
+        return result
+
+    def _count(
+        self,
+        df,
+        group_by: list[str]
+    ) -> list[dict]:
+
+        if not group_by:
+            raise ValueError(
+                "Nenhuma coluna group_by informada."
+            )
+
+        self._validate_columns(
+            df=df,
+            columns=group_by,
+            label="group_by"
+        )
 
         result = (
-            df[group_by]
-            .astype(str)
-            .value_counts()
-            .reset_index()
+            df.groupby(group_by)
+            .size()
+            .reset_index(name="count")
+            .sort_values("count", ascending=False)
             .head(20)
         )
 
-        result.columns = [group_by, "count"]
-
         return result.to_dict(orient="records")
 
-    def _normalize_group_by(self, group_by) -> list[str]:
-        if isinstance(group_by, str):
-            return [group_by]
-
-        if isinstance(group_by, list):
-            return group_by
-
-        raise ValueError(f"group_by inválido: {group_by}")
-
-
     def _groupby(
-            self,
-            df,
-            group_by,
-            metric: str | None,
-            aggregation: str
-        ) -> list[dict]:
-            group_columns = self._normalize_group_by(group_by)
+        self,
+        df,
+        group_by: list[str],
+        metric: list[str],
+        aggregation: list[str]
+    ) -> list[dict]:
 
-            for column in group_columns:
-                if column not in df.columns:
-                    raise ValueError(f"Coluna group_by inválida: {column}")
+        if not group_by:
+            raise ValueError(
+                "Nenhuma coluna group_by informada."
+            )
 
-            if aggregation == "count":
-                result = (
-                    df.groupby(group_columns)
-                    .size()
-                    .reset_index(name="value")
-                    .sort_values("value", ascending=False)
-                    .head(20)
-                )
+        self._validate_columns(
+            df=df,
+            columns=group_by,
+            label="group_by"
+        )
 
-                return result.to_dict(orient="records")
-
-            if not metric or metric not in df.columns:
-                raise ValueError(f"Coluna metric inválida: {metric}")
-
+        if not metric:
             result = (
-                df.groupby(group_columns)[metric]
-                .agg(aggregation)
-                .reset_index(name="value")
-                .sort_values("value", ascending=False)
+                df.groupby(group_by)
+                .size()
+                .reset_index(name="count")
+                .sort_values("count", ascending=False)
                 .head(20)
             )
 
             return result.to_dict(orient="records")
 
+        self._validate_columns(
+            df=df,
+            columns=metric,
+            label="metric"
+        )
+
+        result = (
+            df.groupby(group_by)[metric]
+            .agg(aggregation)
+            .reset_index()
+        )
+
+        result = self._flatten_columns(result)
+
+        numeric_columns = [
+            col for col in result.columns
+            if col not in group_by
+        ]
+
+        if numeric_columns:
+            result = result.sort_values(
+                numeric_columns[0],
+                ascending=False
+            )
+
+        result = result.head(20)
+
+        return result.to_dict(orient="records")
 
     def _time_groupby(
         self,
         df,
         time_column: str,
-        metric: str | None,
-        aggregation: str,
+        metric: list[str],
+        aggregation: list[str],
         time_freq: str,
-        group_by=None
+        group_by: list[str] | None = None
     ) -> list[dict]:
-        if not time_column or time_column not in df.columns:
-            raise ValueError(f"Coluna de tempo inválida: {time_column}")
+
+        if not time_column:
+            raise ValueError(
+                "time_column não informado."
+            )
+
+        if time_column not in df.columns:
+            raise ValueError(
+                f"Coluna de tempo inválida: {time_column}"
+            )
 
         temp_df = df.copy()
 
@@ -115,10 +202,14 @@ class PandasTools:
             errors="coerce"
         )
 
-        temp_df = temp_df.dropna(subset=[time_column])
+        temp_df = temp_df.dropna(
+            subset=[time_column]
+        )
 
         if temp_df.empty:
-            raise ValueError("Nenhuma data válida encontrada.")
+            raise ValueError(
+                "Nenhuma data válida encontrada."
+            )
 
         temp_df["periodo"] = (
             temp_df[time_column]
@@ -129,47 +220,62 @@ class PandasTools:
         group_columns = ["periodo"]
 
         if group_by:
-            extra_groups = self._normalize_group_by(group_by)
+            self._validate_columns(
+                df=temp_df,
+                columns=group_by,
+                label="group_by"
+            )
 
-            for column in extra_groups:
-                if column not in temp_df.columns:
-                    raise ValueError(f"Coluna group_by inválida: {column}")
+            group_columns.extend(group_by)
 
-            group_columns.extend(extra_groups)
-
-        if aggregation == "count":
+        if not metric:
             result = (
                 temp_df.groupby(group_columns)
                 .size()
-                .reset_index(name="value")
+                .reset_index(name="count")
                 .sort_values("periodo")
                 .head(20)
             )
+
         else:
-            if not metric or metric not in temp_df.columns:
-                raise ValueError(f"Coluna metric inválida: {metric}")
+            self._validate_columns(
+                df=temp_df,
+                columns=metric,
+                label="metric"
+            )
 
             result = (
                 temp_df.groupby(group_columns)[metric]
                 .agg(aggregation)
-                .reset_index(name="value")
-                .sort_values("periodo")
-                .head(20)
+                .reset_index()
             )
 
+            result = self._flatten_columns(result)
+
+            result = result.sort_values(
+                "periodo"
+            ).head(20)
+
         if len(group_columns) > 1:
-            result["label"] = result[group_columns].astype(str).agg(" - ".join, axis=1)
+            result["label"] = (
+                result[group_columns]
+                .astype(str)
+                .agg(" - ".join, axis=1)
+            )
         else:
-            result["label"] = result["periodo"].astype(str)
+            result["label"] = (
+                result["periodo"]
+                .astype(str)
+            )
 
         return result.to_dict(orient="records")
-    
-    
+
     @staticmethod
     def rename_columns_df(
         df: pd.DataFrame,
         rename_map: dict[str, str] | None
     ) -> pd.DataFrame:
+
         if df.empty:
             return df
 
@@ -187,4 +293,6 @@ class PandasTools:
         if not safe_rename_map:
             return df
 
-        return df.rename(columns=safe_rename_map)
+        return df.rename(
+            columns=safe_rename_map
+        )
