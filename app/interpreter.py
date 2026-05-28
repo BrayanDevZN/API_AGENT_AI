@@ -1,12 +1,12 @@
 import json
 from openai import OpenAI
-from core.config import settings
+from core.config import Settings
 
 
 class Interpreter:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = settings.OPENAI_MODEL
+        self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
+        self.model = Settings.OPENAI_MODEL
 
     def run(self, question: str, columns: list[str], messages: list) -> dict:
         if not columns:
@@ -29,7 +29,7 @@ class Interpreter:
         system_prompt = """
 Você é um planejador de análise de dados.
 
-Sua função é escolher uma operação pandas simples para gerar um gráfico.
+Sua função é escolher operações pandas simples para gerar gráfico.
 Você receberá o pedido do usuário e o schema do dataset.
 
 Responda SOMENTE em JSON válido.
@@ -38,26 +38,58 @@ Não explique.
 
 Formato obrigatório:
 {
+  "tool": "chart_plan | rename_columns",
   "operation": "groupby | count | time_groupby",
-  "group_by": "nome_da_coluna_ou_null",
-  "metric": "nome_da_coluna_ou_null",
-  "aggregation": "sum | mean | count | max | min",
+  "group_by": ["coluna_1", "coluna_2"],
+  "metric": ["coluna_numerica_1", "coluna_numerica_2"],
+  "aggregation": ["sum", "mean"],
   "chart_type": "bar | line | pie | scatter",
   "title": "Título do gráfico",
   "x": "coluna_eixo_x",
   "y": "coluna_eixo_y",
   "time_column": "coluna_de_data_ou_null",
-  "time_freq": "D | M | Y"
+  "time_freq": "D | M | Y",
+  "rename_columns": {
+    "nome_original": "Nome Mais Intuitivo"
+  }
 }
 
-REGRAS:
+TOOLS DISPONÍVEIS:
+
+1. chart_plan
+Use quando precisar gerar gráfico/análise.
+
+2. rename_columns
+Use quando as colunas tiverem nomes ruins, técnicos, abreviados ou pouco intuitivos.
+Exemplo:
+{
+  "tool": "rename_columns",
+  "rename_columns": {
+    "vlr_rec": "Receita",
+    "qtd_conv": "Conversões",
+    "dt_camp": "Data da Campanha"
+  }
+}
+
+REGRAS GERAIS:
+- Responda sempre no formato JSON obrigatório.
 - Use apenas colunas existentes no schema.
 - Não invente colunas.
-- Não altere o nome das colunas.
 - Se uma coluna tiver acento, espaço, underline ou letra maiúscula, copie exatamente como está.
-- Para "mais usado", "mais comum", "mais frequente", "quantidade por", "contagem por", use aggregation "count".
-- aggregation "count" pode ser usada em colunas de texto/categoria.
-- Para count, metric deve ser null.
+- Você pode usar rename_columns para deixar os nomes mais claros.
+- Após renomear colunas, use os nomes novos em x, y, group_by e metric.
+- Se não precisar renomear, retorne "rename_columns": {}.
+- group_by SEMPRE deve ser lista.
+- metric SEMPRE deve ser lista.
+- aggregation SEMPRE deve ser lista.
+- group_by pode ter uma ou várias colunas.
+- metric pode ter uma ou várias colunas.
+- aggregation pode ter uma ou várias funções.
+- Aggregations permitidas: sum, mean, count, max, min.
+
+REGRAS DE GRÁFICO:
+- Para "mais usado", "mais comum", "mais frequente", "quantidade por", "contagem por", use operation "count".
+- Para count, metric deve ser [].
 - Para count, group_by deve ser a coluna categórica analisada.
 - Para ranking, comparação ou total por categoria com valor numérico, use operation "groupby".
 - Para quantidade por categoria sem valor numérico, use operation "count".
@@ -69,6 +101,7 @@ REGRAS:
 - Para evolução temporal, use chart_type "line".
 - Para proporção, use chart_type "pie".
 - Para comparação comum, use chart_type "bar".
+- Para relação entre duas variáveis numéricas, use chart_type "scatter".
 """
 
         user_prompt = f"""
@@ -109,7 +142,8 @@ Formato obrigatório:
   "y": null,
   "aggregation": "none",
   "mode": "chat",
-  "reason": "sem_dataset"
+  "reason": "sem_dataset",
+  "rename_columns": {{}}
 }}
 
 Pergunta do usuário:
@@ -133,7 +167,24 @@ Formato obrigatório:
   "y": "nome_da_coluna_ou_null",
   "aggregation": "sum | mean | count | max | min | none",
   "mode": "analysis | chat",
-  "reason": "explicacao_curta"
+  "reason": "explicacao_curta",
+  "rename_columns": {{
+    "nome_original": "Nome Mais Intuitivo"
+  }}
+}}
+
+Nova tool disponível:
+- rename_columns
+
+Use rename_columns quando as colunas tiverem nomes ruins, técnicos ou pouco intuitivos.
+
+Exemplo:
+{{
+  "rename_columns": {{
+    "vlr_total": "Receita Total",
+    "qtd_vnd": "Quantidade Vendida",
+    "dt_cmp": "Data da Campanha"
+  }}
 }}
 
 Regras:
@@ -141,6 +192,8 @@ Regras:
 - Não invente colunas.
 - Para count, y deve ser null.
 - Se for conversa comum, use chart_type "none".
+- Se não precisar renomear, retorne "rename_columns": {{}}.
+- Após renomear colunas, use os nomes novos em x e y.
 
 Pergunta:
 {question}
@@ -152,6 +205,15 @@ Histórico:
 {json.dumps(messages, ensure_ascii=False)}
 """
 
+    def _as_list(self, value):
+        if value is None:
+            return []
+
+        if isinstance(value, list):
+            return value
+
+        return [value]
+
     def _safe_json(self, output_text: str) -> dict:
         try:
             data = json.loads(output_text)
@@ -162,6 +224,7 @@ Histórico:
             aggregation = data.get("aggregation", "none")
             mode = data.get("mode", "chat")
             reason = data.get("reason", "")
+            rename_columns = data.get("rename_columns", {})
 
             if chart_type not in ["bar", "line", "pie", "scatter", "none"]:
                 chart_type = "none"
@@ -171,6 +234,9 @@ Histórico:
 
             if mode not in ["analysis", "chat"]:
                 mode = "chat"
+
+            if not isinstance(rename_columns, dict):
+                rename_columns = {}
 
             if chart_type == "none":
                 x = None
@@ -186,7 +252,8 @@ Histórico:
                 "y": y,
                 "aggregation": aggregation,
                 "mode": mode,
-                "reason": reason
+                "reason": reason,
+                "rename_columns": rename_columns
             }
 
         except Exception:
@@ -196,23 +263,38 @@ Histórico:
                 "y": None,
                 "aggregation": "none",
                 "mode": "chat",
-                "reason": "json_invalido"
+                "reason": "json_invalido",
+                "rename_columns": {}
             }
 
     def _safe_dashboard_plan(self, output_text: str) -> dict:
         try:
             data = json.loads(output_text)
 
+            tool = data.get("tool", "chart_plan")
             operation = data.get("operation", "count")
-            aggregation = data.get("aggregation", "count")
             chart_type = data.get("chart_type", "bar")
             time_freq = data.get("time_freq", "M")
+            rename_columns = data.get("rename_columns", {})
+
+            group_by = self._as_list(data.get("group_by"))
+            metric = self._as_list(data.get("metric"))
+            aggregation = self._as_list(data.get("aggregation", "count"))
+
+            if tool not in ["chart_plan", "rename_columns"]:
+                tool = "chart_plan"
 
             if operation not in ["groupby", "count", "time_groupby"]:
                 operation = "count"
 
-            if aggregation not in ["sum", "mean", "count", "max", "min"]:
-                aggregation = "count"
+            valid_aggregations = ["sum", "mean", "count", "max", "min"]
+            aggregation = [
+                agg for agg in aggregation
+                if agg in valid_aggregations
+            ]
+
+            if not aggregation:
+                aggregation = ["count"]
 
             if chart_type not in ["bar", "line", "pie", "scatter"]:
                 chart_type = "bar"
@@ -220,36 +302,52 @@ Histórico:
             if time_freq not in ["D", "M", "Y"]:
                 time_freq = "M"
 
+            if not isinstance(rename_columns, dict):
+                rename_columns = {}
+
             if operation == "count":
-                data["metric"] = None
-                aggregation = "count"
+                metric = []
+                aggregation = ["count"]
 
             if operation == "time_groupby":
                 chart_type = "line"
 
+            x = data.get("x")
+            y = data.get("y")
+
+            if not x:
+                x = group_by[0] if group_by else "periodo"
+
+            if not y:
+                y = metric[0] if metric else "count"
+
             return {
+                "tool": tool,
                 "operation": operation,
-                "group_by": data.get("group_by"),
-                "metric": data.get("metric"),
+                "group_by": group_by,
+                "metric": metric,
                 "aggregation": aggregation,
                 "chart_type": chart_type,
                 "title": data.get("title", "Dashboard gerado"),
-                "x": data.get("x") or data.get("group_by") or "periodo",
-                "y": data.get("y") or data.get("metric") or "count",
+                "x": x,
+                "y": y,
                 "time_column": data.get("time_column"),
-                "time_freq": time_freq
+                "time_freq": time_freq,
+                "rename_columns": rename_columns
             }
 
         except Exception:
             return {
+                "tool": "chart_plan",
                 "operation": "count",
-                "group_by": None,
-                "metric": None,
-                "aggregation": "count",
+                "group_by": [],
+                "metric": [],
+                "aggregation": ["count"],
                 "chart_type": "bar",
                 "title": "Dashboard gerado",
                 "x": None,
                 "y": "count",
                 "time_column": None,
-                "time_freq": "M"
+                "time_freq": "M",
+                "rename_columns": {}
             }

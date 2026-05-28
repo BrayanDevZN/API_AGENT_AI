@@ -163,3 +163,28 @@ class PandasTools:
             result["label"] = result["periodo"].astype(str)
 
         return result.to_dict(orient="records")
+    
+    
+    @staticmethod
+    def rename_columns_df(
+        df: pd.DataFrame,
+        rename_map: dict[str, str] | None
+    ) -> pd.DataFrame:
+        if df.empty:
+            return df
+
+        if not rename_map:
+            return df
+
+        safe_rename_map = {
+            old_name: new_name.strip()
+            for old_name, new_name in rename_map.items()
+            if old_name in df.columns
+            and isinstance(new_name, str)
+            and new_name.strip()
+        }
+
+        if not safe_rename_map:
+            return df
+
+        return df.rename(columns=safe_rename_map)
