@@ -21,6 +21,7 @@ class AnalyzeJsonRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     answer: str
     chart: Optional[dict] = None
+    charts: list[dict] = Field(default_factory=list)
     interpretation: Optional[dict] = None
 
 
@@ -47,3 +48,4 @@ class DashboardAnalyzeResponse(BaseModel):
     dashboard: dict
     charts: list[dict]
     ai_suggestion: str
+    plan: dict | None = None

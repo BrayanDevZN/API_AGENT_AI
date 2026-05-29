@@ -42,46 +42,48 @@ class Service:
             interpretation = self.interpreter.run(
                 question=question,
                 columns=columns,
-                messages=messages
+                messages=messages,
             )
 
             chart = {
                 "type": "none",
                 "x": None,
                 "y": None,
-                "data": []
+                "data": [],
             }
 
             if interpretation.get("mode") == "analysis":
                 chart = self.analyzer.run(
                     dataset=dataset,
-                    interpretation=interpretation
+                    interpretation=interpretation,
                 )
 
             answer = self.generator.run(
                 question=question,
                 chart=chart,
                 messages=messages,
-                interpretation=interpretation
+                interpretation=interpretation,
             )
 
             return {
                 "answer": answer,
                 "chart": chart,
-                "interpretation": interpretation
+                "charts": [chart] if chart and chart.get("type") != "none" else [],
+                "interpretation": interpretation,
             }
 
         answer = self.generator.run(
             question=question,
             chart=None,
             messages=messages,
-            interpretation=None
+            interpretation=None,
         )
 
         return {
             "answer": answer,
             "chart": None,
-            "interpretation": None
+            "charts": [],
+            "interpretation": None,
         }
 
     def chat(self, data: dict) -> dict:
@@ -96,16 +98,16 @@ class Service:
 
         messages = self.accounts.get_messages(
             token=token,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
         )
 
         answer = self.generator.chat(
             question=question,
-            messages=messages
+            messages=messages,
         )
 
         return {
-            "answer": answer
+            "answer": answer,
         }
 
     def generate_dashboard(self, data: dict) -> dict:
@@ -119,24 +121,55 @@ class Service:
             raise ValueError("Token inválido.")
 
         df = self.cleaner.clean(dataset)
-
         schema = self.profiler.profile(df)
 
         plan = self.interpreter.dashboard_plan(
             prompt=prompt,
-            schema=schema
+            schema=schema,
         )
 
-        metrics = self.pandas_tools.execute(
-            df=df,
-            plan=plan
-        )
+        chart_plans = plan.get("charts") or [plan]
 
-        ai_suggestion = self.generator.dashboard_analysis(
+        all_charts_data = []
+
+        for index, chart_plan in enumerate(chart_plans):
+            metrics = self.pandas_tools.execute(
+                df=df,
+                plan=chart_plan,
+            )
+
+            operation = chart_plan.get("operation")
+
+            chart_x = (
+                "label"
+                if operation == "time_groupby"
+                else chart_plan.get("x")
+            )
+
+            chart_y = (
+                "value"
+                if operation == "time_groupby"
+                else chart_plan.get("y")
+            )
+
+            all_charts_data.append({
+                "index": index + 1,
+                "title": chart_plan.get("title", f"Gráfico {index + 1}"),
+                "chart_type": chart_plan.get("chart_type", "bar"),
+                "operation": operation,
+                "x": chart_x,
+                "y": chart_y,
+                "aggregation": chart_plan.get("aggregation"),
+                "reason": chart_plan.get("reason", ""),
+                "plan": chart_plan,
+                "data": metrics,
+            })
+
+        ai_suggestion = self.generator.dashboard_analysis_multi(
             prompt=prompt,
+            charts=all_charts_data,
+            schema=schema,
             plan=plan,
-            metrics=metrics,
-            schema=schema
         )
 
         dashboard = self.accounts.create_dashboard(
@@ -144,30 +177,38 @@ class Service:
             title=title,
             prompt=prompt,
             ai_suggestion=ai_suggestion,
-            file_name=file_name
+            file_name=file_name,
         )
 
         if not dashboard:
             raise ValueError("Erro ao salvar dashboard.")
 
-        chart = self.accounts.create_dashboard_chart(
-            dashboard_id=dashboard["id"],
-            chart_type=plan["chart_type"],
-            title=plan["title"],
-            chart_data=metrics,
-            chart_config={
-                "x": "label" if plan["operation"] == "time_groupby" else plan["x"],
-                "y": "value" if plan["operation"] == "time_groupby" else plan["y"],
-                "aggregation": plan["aggregation"],
-                "operation": plan["operation"]
-            }
-        )
+        created_charts = []
 
-        if not chart:
-            raise ValueError("Erro ao salvar gráfico.")
+        for chart_data in all_charts_data:
+            chart = self.accounts.create_dashboard_chart(
+                dashboard_id=dashboard["id"],
+                chart_type=chart_data["chart_type"],
+                title=chart_data["title"],
+                chart_data=chart_data["data"],
+                chart_config={
+                    "x": chart_data["x"],
+                    "y": chart_data["y"],
+                    "aggregation": chart_data["aggregation"],
+                    "operation": chart_data["operation"],
+                    "reason": chart_data["reason"],
+                },
+            )
+
+            if chart:
+                created_charts.append(chart)
+
+        if not created_charts:
+            raise ValueError("Erro ao salvar gráficos.")
 
         return {
             "dashboard": dashboard,
-            "charts": [chart],
-            "ai_suggestion": ai_suggestion
+            "charts": created_charts,
+            "ai_suggestion": ai_suggestion,
+            "plan": plan,
         }

@@ -23,6 +23,29 @@ class Generator:
 
         return response.output_text
 
+    def run(
+        self,
+        question: str,
+        chart: dict | None = None,
+        charts: list[dict] | None = None,
+        messages: list[dict] | None = None,
+        interpretation: dict | None = None
+    ) -> str:
+        if charts:
+            return self.analysis_multi(
+                question=question,
+                charts=charts,
+                messages=messages,
+                interpretation=interpretation
+            )
+
+        return self.analysis(
+            question=question,
+            chart=chart,
+            messages=messages,
+            interpretation=interpretation
+        )
+
     def analysis(
         self,
         question: str,
@@ -42,6 +65,178 @@ class Generator:
         response = self.client.responses.create(
             model=self.model,
             input=prompt
+        )
+
+        return response.output_text
+
+    def analysis_multi(
+        self,
+        question: str,
+        charts: list[dict],
+        messages: list[dict] | None = None,
+        interpretation: dict | None = None
+    ) -> str:
+        messages = messages or []
+
+        prompt = self._analysis_multi_prompt(
+            question=question,
+            charts=charts,
+            messages=messages,
+            interpretation=interpretation
+        )
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=prompt
+        )
+
+        return response.output_text
+
+    def dashboard_analysis(
+        self,
+        prompt: str,
+        plan: dict,
+        metrics: list[dict],
+        schema: dict
+    ) -> str:
+        final_prompt = f"""
+Você é o DataPilot AI, uma IA especialista em análise de dados, dashboards e Business Intelligence.
+
+Você receberá UM OU MAIS gráficos já processados pelo pandas.
+
+Sua função é analisar todos os gráficos em conjunto.
+
+REGRAS OBRIGATÓRIAS:
+- Responda em português.
+- Use apenas os dados fornecidos.
+- Não invente dados.
+- Não invente colunas.
+- Não recalcule métricas.
+- Não trate hipóteses como certeza.
+- Se os dados forem insuficientes, diga claramente.
+- Não use JSON.
+- Não use markdown pesado.
+- Foque em insights, padrões e recomendações.
+
+O QUE ANALISAR:
+- maiores valores
+- menores valores
+- concentração
+- ranking
+- tendência
+- distribuição
+- possíveis anomalias
+- relação entre gráficos
+- riscos
+- oportunidades
+
+ESTRUTURA DA RESPOSTA:
+Resumo executivo
+
+Principais descobertas
+
+Padrões encontrados
+
+Riscos e oportunidades
+
+Recomendações
+
+Próximos passos
+
+Pedido do usuário:
+{prompt}
+
+Plano usado:
+{json.dumps(plan, ensure_ascii=False)}
+
+Schema do dataset:
+{json.dumps(schema, ensure_ascii=False)}
+
+Gráficos e métricas calculadas:
+{json.dumps(metrics, ensure_ascii=False)}
+
+Resposta:
+"""
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=final_prompt
+        )
+
+        return response.output_text
+
+    def dashboard_analysis_multi(
+        self,
+        prompt: str,
+        charts: list[dict],
+        schema: dict,
+        plan: dict | None = None
+    ) -> str:
+        plan = plan or {}
+
+        final_prompt = f"""
+Você é o DataPilot AI, uma IA especialista em análise de dados, dashboards e Business Intelligence.
+
+Você recebeu vários gráficos já processados.
+Cada gráfico contém título, tipo, operação, configuração e dados calculados.
+
+Sua função é gerar UMA análise geral sobre todos os gráficos.
+
+REGRAS OBRIGATÓRIAS:
+- Responda em português.
+- Use apenas os dados fornecidos.
+- Não invente dados.
+- Não invente colunas.
+- Não recalcule métricas.
+- Não afirme causas como certeza.
+- Quando falar de causa, use linguagem de hipótese.
+- Se os dados forem insuficientes, diga isso claramente.
+- Não use JSON.
+- Não use markdown pesado.
+- Não analise cada gráfico isoladamente sem conectar os pontos.
+- Faça conexões entre os gráficos quando fizer sentido.
+
+FOQUE EM:
+- resumo geral do cenário
+- principais padrões
+- comparações entre gráficos
+- concentração de resultados
+- tendência temporal, se existir gráfico de tempo
+- oportunidades
+- riscos
+- recomendações práticas
+
+ESTRUTURA DA RESPOSTA:
+Resumo executivo
+
+Principais descobertas
+
+Relação entre os gráficos
+
+Riscos e oportunidades
+
+Recomendações práticas
+
+Próximos passos
+
+Pedido do usuário:
+{prompt}
+
+Plano utilizado:
+{json.dumps(plan, ensure_ascii=False)}
+
+Schema:
+{json.dumps(schema, ensure_ascii=False)}
+
+Gráficos:
+{json.dumps(charts, ensure_ascii=False)}
+
+Resposta:
+"""
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=final_prompt
         )
 
         return response.output_text
@@ -157,49 +352,56 @@ DADOS/GRÁFICO ANALISADO:
 
 Resposta:
 """
-    def dashboard_analysis(
+
+    def _analysis_multi_prompt(
         self,
-        prompt: str,
-        plan: dict,
-        metrics: list[dict],
-        schema: dict
+        question: str,
+        charts: list[dict],
+        messages: list[dict],
+        interpretation: dict | None
     ) -> str:
-        final_prompt = f"""
-    Você é o DataPilot AI, uma IA especialista em análise de dados e dashboards.
+        history = self._format_history(messages)
 
-    Sua função é analisar métricas já calculadas pelo pandas.
-    Você NÃO deve inventar dados.
-    Você NÃO deve inventar colunas.
-    Você deve usar apenas os dados fornecidos.
+        return f"""
+Você é o DataPilot AI, uma IA especialista em análise de dados, dashboards, BI e geração de insights.
 
-    REGRAS:
-    - Responda em português.
-    - Seja claro e profissional.
-    - Explique o que o gráfico mostra.
-    - Destaque maiores valores, menores valores, concentração, tendência ou distribuição.
-    - Trate causas como hipóteses, não como certeza.
-    - Dê recomendações práticas.
-    - Não use JSON.
-    - Não use markdown pesado.
+Neste endpoint, você está em modo ANÁLISE COM MÚLTIPLOS GRÁFICOS.
+Você deve analisar todos os gráficos fornecidos pela aplicação.
 
-    Pedido do usuário:
-    {prompt}
+REGRAS OBRIGATÓRIAS:
+- Responda em português.
+- Use apenas os dados fornecidos.
+- Não invente dados.
+- Não invente colunas.
+- Não recalcule métricas.
+- Não invente causas como certeza.
+- Quando falar de causa, trate como hipótese.
+- Se os dados forem insuficientes, diga isso claramente.
+- Não use JSON.
+- Não use markdown pesado.
+- Faça conexões entre os gráficos quando fizer sentido.
+- Não repita todos os números sem necessidade.
+- Foque em padrões e decisões.
 
-    Plano usado:
-    {json.dumps(plan, ensure_ascii=False)}
+ESTRUTURA:
+1. Resumo geral
+2. Principais descobertas
+3. Relação entre os gráficos
+4. Riscos e oportunidades
+5. Recomendações práticas
+6. Próximos passos
 
-    Schema do dataset:
-    {json.dumps(schema, ensure_ascii=False)}
+HISTÓRICO DA CONVERSA:
+{history}
 
-    Métricas calculadas:
-    {json.dumps(metrics, ensure_ascii=False)}
+PERGUNTA DO USUÁRIO:
+{question}
 
-    Resposta:
-    """
+INTERPRETAÇÃO USADA:
+{json.dumps(interpretation, ensure_ascii=False)}
 
-        response = self.client.responses.create(
-            model=self.model,
-            input=final_prompt
-        )
+GRÁFICOS ANALISADOS:
+{json.dumps(charts, ensure_ascii=False)}
 
-        return response.output_text
+Resposta:
+"""

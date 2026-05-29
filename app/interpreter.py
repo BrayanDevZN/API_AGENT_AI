@@ -4,6 +4,32 @@ from core.config import Settings
 
 
 class Interpreter:
+    VALID_CHART_TYPES = [
+        "bar",
+        "horizontal_bar",
+        "line",
+        "area",
+        "pie",
+        "donut",
+        "scatter",
+        "table",
+        "none",
+    ]
+
+    VALID_OPERATIONS = [
+        "groupby",
+        "count",
+        "time_groupby",
+    ]
+
+    VALID_AGGREGATIONS = [
+        "sum",
+        "mean",
+        "count",
+        "max",
+        "min",
+    ]
+
     def __init__(self):
         self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
         self.model = Settings.OPENAI_MODEL
@@ -15,93 +41,115 @@ class Interpreter:
             prompt = self._analysis_prompt(
                 question=question,
                 columns=columns,
-                messages=messages
+                messages=messages,
             )
 
         response = self.client.responses.create(
             model=self.model,
-            input=prompt
+            input=prompt,
         )
 
         return self._safe_json(response.output_text)
 
     def dashboard_plan(self, prompt: str, schema: dict) -> dict:
         system_prompt = """
-Você é um planejador de análise de dados.
+Você é um planejador especialista em análise de dados e dashboards.
 
-Sua função é escolher operações pandas simples para gerar gráfico.
+Sua função é transformar o pedido do usuário em um plano com UM OU MAIS gráficos.
 Você receberá o pedido do usuário e o schema do dataset.
 
 Responda SOMENTE em JSON válido.
 Não use markdown.
-Não explique.
+Não explique fora do JSON.
 
 Formato obrigatório:
 {
-  "tool": "chart_plan | rename_columns",
-  "operation": "groupby | count | time_groupby",
-  "group_by": ["coluna_1", "coluna_2"],
-  "metric": ["coluna_numerica_1", "coluna_numerica_2"],
-  "aggregation": ["sum", "mean"],
-  "chart_type": "bar | line | pie | scatter",
-  "title": "Título do gráfico",
-  "x": "coluna_eixo_x",
-  "y": "coluna_eixo_y",
-  "time_column": "coluna_de_data_ou_null",
-  "time_freq": "D | M | Y",
+  "tool": "dashboard_plan | rename_columns",
   "rename_columns": {
     "nome_original": "Nome Mais Intuitivo"
-  }
+  },
+  "charts": [
+    {
+      "title": "Título do gráfico",
+      "operation": "groupby | count | time_groupby",
+      "group_by": ["coluna_1"],
+      "metric": ["coluna_numerica_1"],
+      "aggregation": ["sum"],
+      "chart_type": "bar | horizontal_bar | line | area | pie | donut | scatter | table",
+      "x": "coluna_eixo_x",
+      "y": "coluna_eixo_y",
+      "time_column": "coluna_de_data_ou_null",
+      "time_freq": "D | M | Y",
+      "reason": "motivo curto da escolha"
+    }
+  ]
 }
 
 TOOLS DISPONÍVEIS:
 
-1. chart_plan
-Use quando precisar gerar gráfico/análise.
+1. dashboard_plan
+Use quando o usuário pedir análise, dashboard, gráfico, comparação, resumo, ranking, tendência ou visão geral.
 
 2. rename_columns
 Use quando as colunas tiverem nomes ruins, técnicos, abreviados ou pouco intuitivos.
-Exemplo:
-{
-  "tool": "rename_columns",
-  "rename_columns": {
-    "vlr_rec": "Receita",
-    "qtd_conv": "Conversões",
-    "dt_camp": "Data da Campanha"
-  }
-}
 
 REGRAS GERAIS:
-- Responda sempre no formato JSON obrigatório.
+- Retorne no máximo 4 gráficos.
+- Retorne pelo menos 1 gráfico quando houver dataset e pedido de análise.
 - Use apenas colunas existentes no schema.
 - Não invente colunas.
 - Se uma coluna tiver acento, espaço, underline ou letra maiúscula, copie exatamente como está.
-- Você pode usar rename_columns para deixar os nomes mais claros.
-- Após renomear colunas, use os nomes novos em x, y, group_by e metric.
-- Se não precisar renomear, retorne "rename_columns": {}.
 - group_by SEMPRE deve ser lista.
 - metric SEMPRE deve ser lista.
 - aggregation SEMPRE deve ser lista.
-- group_by pode ter uma ou várias colunas.
-- metric pode ter uma ou várias colunas.
-- aggregation pode ter uma ou várias funções.
-- Aggregations permitidas: sum, mean, count, max, min.
+- Se não precisar renomear colunas, retorne "rename_columns": {}.
+- Após renomear colunas, use os nomes novos nos gráficos.
+- Cada gráfico deve responder uma parte útil do pedido do usuário.
+- Evite gráficos repetidos com a mesma ideia.
 
-REGRAS DE GRÁFICO:
-- Para "mais usado", "mais comum", "mais frequente", "quantidade por", "contagem por", use operation "count".
-- Para count, metric deve ser [].
-- Para count, group_by deve ser a coluna categórica analisada.
-- Para ranking, comparação ou total por categoria com valor numérico, use operation "groupby".
-- Para quantidade por categoria sem valor numérico, use operation "count".
-- Para análise por tempo, mês, dia, ano, evolução, tendência, período ou data, use operation "time_groupby".
-- Para time_groupby, use uma coluna de data em time_column.
+REGRAS DE OPERAÇÃO:
+- Para "mais vendido", "maior receita", "total por categoria", "ranking por valor", use groupby.
+- Para "mais comum", "mais frequente", "quantidade por", "contagem por", use count.
+- Para "evolução", "tendência", "por mês", "por dia", "por ano", use time_groupby.
+- Para count, metric deve ser [] e aggregation deve ser ["count"].
+- Para time_groupby, time_column deve ser uma coluna de data.
 - Para análise mensal, use time_freq "M".
 - Para análise diária, use time_freq "D".
 - Para análise anual, use time_freq "Y".
-- Para evolução temporal, use chart_type "line".
-- Para proporção, use chart_type "pie".
-- Para comparação comum, use chart_type "bar".
-- Para relação entre duas variáveis numéricas, use chart_type "scatter".
+
+REGRAS DE CHART_TYPE:
+- bar: comparação comum entre categorias.
+- horizontal_bar: ranking com nomes longos ou muitas categorias.
+- line: evolução temporal.
+- area: evolução temporal com volume acumulado ou tendência geral.
+- pie: participação percentual com poucas categorias, no máximo 6.
+- donut: participação percentual visual com poucas categorias, no máximo 6.
+- scatter: relação entre duas variáveis numéricas.
+- table: quando gráfico não for adequado ou quando o resultado for muito detalhado.
+
+REGRAS PARA ESCOLHER VÁRIOS GRÁFICOS:
+- Se o usuário pedir uma visão geral, crie 2 a 4 gráficos complementares.
+- Para vendas, considere gráficos como:
+  1. total por produto/categoria
+  2. evolução no tempo se houver data
+  3. participação por categoria
+  4. ranking dos maiores valores
+- Para campanhas, considere:
+  1. receita por campanha
+  2. conversões por campanha
+  3. evolução por período
+  4. taxa ou média se existir coluna adequada
+- Para dados financeiros, considere:
+  1. receita/despesa por categoria
+  2. evolução temporal
+  3. maiores valores
+  4. participação percentual
+
+IMPORTANTE:
+- Não force gráfico de tempo se não existir coluna de data.
+- Não use pie/donut com muitas categorias.
+- Não use scatter se não existirem duas colunas numéricas.
+- Para nomes muito longos no eixo X, prefira horizontal_bar.
 """
 
         user_prompt = f"""
@@ -116,8 +164,8 @@ Schema:
             model=self.model,
             input=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
+                {"role": "user", "content": user_prompt},
+            ],
         )
 
         return self._safe_dashboard_plan(response.output_text)
@@ -133,7 +181,6 @@ Sua função é identificar que a pergunta deve ser tratada como conversa normal
 Responda SOMENTE em JSON válido.
 Não use markdown.
 Não explique.
-Não escreva texto fora do JSON.
 
 Formato obrigatório:
 {{
@@ -159,10 +206,11 @@ Você é um interpretador especialista em análise de dados.
 
 Responda SOMENTE em JSON válido.
 Não use markdown.
+Não explique fora do JSON.
 
 Formato obrigatório:
 {{
-  "chart_type": "bar | line | pie | scatter | none",
+  "chart_type": "bar | horizontal_bar | line | area | pie | donut | scatter | table | none",
   "x": "nome_da_coluna_ou_null",
   "y": "nome_da_coluna_ou_null",
   "aggregation": "sum | mean | count | max | min | none",
@@ -173,20 +221,6 @@ Formato obrigatório:
   }}
 }}
 
-Nova tool disponível:
-- rename_columns
-
-Use rename_columns quando as colunas tiverem nomes ruins, técnicos ou pouco intuitivos.
-
-Exemplo:
-{{
-  "rename_columns": {{
-    "vlr_total": "Receita Total",
-    "qtd_vnd": "Quantidade Vendida",
-    "dt_cmp": "Data da Campanha"
-  }}
-}}
-
 Regras:
 - Use apenas colunas existentes.
 - Não invente colunas.
@@ -194,6 +228,13 @@ Regras:
 - Se for conversa comum, use chart_type "none".
 - Se não precisar renomear, retorne "rename_columns": {{}}.
 - Após renomear colunas, use os nomes novos em x e y.
+- Para comparação comum, use bar.
+- Para ranking com nomes longos, use horizontal_bar.
+- Para evolução temporal, use line.
+- Para tendência com volume ao longo do tempo, use area.
+- Para participação percentual com poucas categorias, use pie ou donut.
+- Para relação entre duas variáveis numéricas, use scatter.
+- Quando gráfico não ajudar, use table.
 
 Pergunta:
 {question}
@@ -226,10 +267,10 @@ Histórico:
             reason = data.get("reason", "")
             rename_columns = data.get("rename_columns", {})
 
-            if chart_type not in ["bar", "line", "pie", "scatter", "none"]:
+            if chart_type not in self.VALID_CHART_TYPES:
                 chart_type = "none"
 
-            if aggregation not in ["sum", "mean", "count", "max", "min", "none"]:
+            if aggregation not in [*self.VALID_AGGREGATIONS, "none"]:
                 aggregation = "none"
 
             if mode not in ["analysis", "chat"]:
@@ -253,7 +294,7 @@ Histórico:
                 "aggregation": aggregation,
                 "mode": mode,
                 "reason": reason,
-                "rename_columns": rename_columns
+                "rename_columns": rename_columns,
             }
 
         except Exception:
@@ -264,90 +305,161 @@ Histórico:
                 "aggregation": "none",
                 "mode": "chat",
                 "reason": "json_invalido",
-                "rename_columns": {}
+                "rename_columns": {},
             }
+
+    def _normalize_chart_plan(self, chart: dict, index: int) -> dict:
+        operation = chart.get("operation", "count")
+        chart_type = chart.get("chart_type", "bar")
+        time_freq = chart.get("time_freq", "M")
+
+        group_by = self._as_list(chart.get("group_by"))
+        metric = self._as_list(chart.get("metric"))
+        aggregation = self._as_list(chart.get("aggregation", "count"))
+
+        if operation not in self.VALID_OPERATIONS:
+            operation = "count"
+
+        aggregation = [
+            agg for agg in aggregation
+            if agg in self.VALID_AGGREGATIONS
+        ]
+
+        if not aggregation:
+            aggregation = ["count"]
+
+        if chart_type not in self.VALID_CHART_TYPES:
+            chart_type = "bar"
+
+        if chart_type == "none":
+            chart_type = "bar"
+
+        if time_freq not in ["D", "M", "Y"]:
+            time_freq = "M"
+
+        if operation == "count":
+            metric = []
+            aggregation = ["count"]
+
+        if operation == "time_groupby" and chart_type not in ["line", "area"]:
+            chart_type = "line"
+
+        x = chart.get("x")
+        y = chart.get("y")
+
+        if not x:
+            x = group_by[0] if group_by else "periodo"
+
+        if not y:
+            y = metric[0] if metric else "count"
+
+        title = chart.get("title") or f"Gráfico {index + 1}"
+
+        return {
+            "title": title,
+            "operation": operation,
+            "group_by": group_by,
+            "metric": metric,
+            "aggregation": aggregation,
+            "chart_type": chart_type,
+            "x": x,
+            "y": y,
+            "time_column": chart.get("time_column"),
+            "time_freq": time_freq,
+            "reason": chart.get("reason", ""),
+        }
 
     def _safe_dashboard_plan(self, output_text: str) -> dict:
         try:
             data = json.loads(output_text)
 
-            tool = data.get("tool", "chart_plan")
-            operation = data.get("operation", "count")
-            chart_type = data.get("chart_type", "bar")
-            time_freq = data.get("time_freq", "M")
+            tool = data.get("tool", "dashboard_plan")
             rename_columns = data.get("rename_columns", {})
 
-            group_by = self._as_list(data.get("group_by"))
-            metric = self._as_list(data.get("metric"))
-            aggregation = self._as_list(data.get("aggregation", "count"))
+            if tool not in ["dashboard_plan", "rename_columns", "chart_plan"]:
+                tool = "dashboard_plan"
 
-            if tool not in ["chart_plan", "rename_columns"]:
-                tool = "chart_plan"
-
-            if operation not in ["groupby", "count", "time_groupby"]:
-                operation = "count"
-
-            valid_aggregations = ["sum", "mean", "count", "max", "min"]
-            aggregation = [
-                agg for agg in aggregation
-                if agg in valid_aggregations
-            ]
-
-            if not aggregation:
-                aggregation = ["count"]
-
-            if chart_type not in ["bar", "line", "pie", "scatter"]:
-                chart_type = "bar"
-
-            if time_freq not in ["D", "M", "Y"]:
-                time_freq = "M"
+            if tool == "chart_plan":
+                tool = "dashboard_plan"
 
             if not isinstance(rename_columns, dict):
                 rename_columns = {}
 
-            if operation == "count":
-                metric = []
-                aggregation = ["count"]
+            raw_charts = data.get("charts")
 
-            if operation == "time_groupby":
-                chart_type = "line"
+            if not isinstance(raw_charts, list):
+                raw_charts = [data]
 
-            x = data.get("x")
-            y = data.get("y")
+            charts = [
+                self._normalize_chart_plan(chart, index)
+                for index, chart in enumerate(raw_charts[:4])
+                if isinstance(chart, dict)
+            ]
 
-            if not x:
-                x = group_by[0] if group_by else "periodo"
+            if not charts:
+                charts = [
+                    {
+                        "title": "Dashboard gerado",
+                        "operation": "count",
+                        "group_by": [],
+                        "metric": [],
+                        "aggregation": ["count"],
+                        "chart_type": "bar",
+                        "x": None,
+                        "y": "count",
+                        "time_column": None,
+                        "time_freq": "M",
+                        "reason": "fallback_sem_graficos",
+                    }
+                ]
 
-            if not y:
-                y = metric[0] if metric else "count"
+            first_chart = charts[0]
 
             return {
                 "tool": tool,
-                "operation": operation,
-                "group_by": group_by,
-                "metric": metric,
-                "aggregation": aggregation,
-                "chart_type": chart_type,
-                "title": data.get("title", "Dashboard gerado"),
-                "x": x,
-                "y": y,
-                "time_column": data.get("time_column"),
-                "time_freq": time_freq,
-                "rename_columns": rename_columns
+                "rename_columns": rename_columns,
+                "charts": charts,
+
+                "operation": first_chart["operation"],
+                "group_by": first_chart["group_by"],
+                "metric": first_chart["metric"],
+                "aggregation": first_chart["aggregation"],
+                "chart_type": first_chart["chart_type"],
+                "title": first_chart["title"],
+                "x": first_chart["x"],
+                "y": first_chart["y"],
+                "time_column": first_chart["time_column"],
+                "time_freq": first_chart["time_freq"],
             }
 
         except Exception:
-            return {
-                "tool": "chart_plan",
+            fallback_chart = {
+                "title": "Dashboard gerado",
                 "operation": "count",
                 "group_by": [],
                 "metric": [],
                 "aggregation": ["count"],
                 "chart_type": "bar",
-                "title": "Dashboard gerado",
                 "x": None,
                 "y": "count",
                 "time_column": None,
                 "time_freq": "M",
-                "rename_columns": {}
+                "reason": "json_invalido",
+            }
+
+            return {
+                "tool": "dashboard_plan",
+                "rename_columns": {},
+                "charts": [fallback_chart],
+
+                "operation": fallback_chart["operation"],
+                "group_by": fallback_chart["group_by"],
+                "metric": fallback_chart["metric"],
+                "aggregation": fallback_chart["aggregation"],
+                "chart_type": fallback_chart["chart_type"],
+                "title": fallback_chart["title"],
+                "x": fallback_chart["x"],
+                "y": fallback_chart["y"],
+                "time_column": fallback_chart["time_column"],
+                "time_freq": fallback_chart["time_freq"],
             }

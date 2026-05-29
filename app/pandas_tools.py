@@ -296,3 +296,59 @@ class PandasTools:
         return df.rename(
             columns=safe_rename_map
         )
+        
+    def execute_many(
+        self,
+        df,
+        plans: list[dict]
+    ) -> list[dict]:
+
+        results = []
+
+        for index, plan in enumerate(plans):
+
+            try:
+                metrics = self.execute(
+                    df=df,
+                    plan=plan
+                )
+
+                results.append({
+                    "id": f"chart_{index + 1}",
+                    "title": plan.get(
+                        "title",
+                        f"Gráfico {index + 1}"
+                    ),
+                    "chart_type": plan.get(
+                        "chart_type",
+                        "bar"
+                    ),
+                    "operation": plan.get(
+                        "operation"
+                    ),
+                    "x": plan.get("x"),
+                    "y": plan.get("y"),
+                    "reason": plan.get(
+                        "reason",
+                        ""
+                    ),
+                    "data": metrics
+                })
+
+            except Exception as error:
+
+                results.append({
+                    "id": f"chart_{index + 1}",
+                    "title": plan.get(
+                        "title",
+                        f"Gráfico {index + 1}"
+                    ),
+                    "chart_type": "none",
+                    "operation": None,
+                    "x": None,
+                    "y": None,
+                    "reason": str(error),
+                    "data": []
+                })
+
+        return results
