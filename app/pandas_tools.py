@@ -2,12 +2,21 @@ import pandas as pd
 
 
 class PandasTools:
+    AGGREGATION_LABELS = {
+        "sum": "",
+        "mean": " Médio",
+        "avg": " Médio",
+        "count": " Quantidade",
+        "max": " Máximo",
+        "min": " Mínimo",
+    }
+
     def execute(self, df, plan: dict) -> list[dict]:
         rename_columns = plan.get("rename_columns", {})
 
         df = self.rename_columns_df(
             df=df,
-            rename_map=rename_columns
+            rename_map=rename_columns,
         )
 
         operation = plan.get("operation")
@@ -30,7 +39,7 @@ class PandasTools:
         if operation == "count":
             return self._count(
                 df=df,
-                group_by=group_by
+                group_by=group_by,
             )
 
         if operation == "groupby":
@@ -38,7 +47,7 @@ class PandasTools:
                 df=df,
                 group_by=group_by,
                 metric=metric,
-                aggregation=aggregation
+                aggregation=aggregation,
             )
 
         if operation == "time_groupby":
@@ -48,7 +57,7 @@ class PandasTools:
                 metric=metric,
                 aggregation=aggregation,
                 time_freq=time_freq,
-                group_by=group_by
+                group_by=group_by,
             )
 
         raise ValueError("Operação não suportada.")
@@ -66,7 +75,7 @@ class PandasTools:
         self,
         df,
         columns: list[str],
-        label: str
+        label: str,
     ) -> None:
         for column in columns:
             if column not in df.columns:
@@ -74,25 +83,71 @@ class PandasTools:
                     f"Coluna {label} inválida: {column}"
                 )
 
+    def _clean_column_name(self, column: str) -> str:
+        name = str(column).strip()
+
+        for aggregation, label in self.AGGREGATION_LABELS.items():
+            suffix = f"_{aggregation}"
+
+            if name.endswith(suffix):
+                name = name[: -len(suffix)].strip()
+
+                if label and not name.lower().endswith(label.strip().lower()):
+                    name = f"{name}{label}"
+
+                break
+
+        name = name.replace("_", " ")
+        name = " ".join(name.split())
+
+        return name
+
     def _flatten_columns(
         self,
-        result: pd.DataFrame
+        result: pd.DataFrame,
     ) -> pd.DataFrame:
-        result.columns = [
-            "_".join(
-                [str(part) for part in col if part]
+        new_columns = []
+
+        for column in result.columns:
+            if isinstance(column, tuple):
+                parts = [
+                    str(part).strip()
+                    for part in column
+                    if part is not None and str(part).strip()
+                ]
+
+                if len(parts) >= 2:
+                    metric = " ".join(parts[:-1]).strip()
+                    aggregation = parts[-1].strip()
+
+                    label = self.AGGREGATION_LABELS.get(
+                        aggregation,
+                        "",
+                    )
+
+                    if label:
+                        new_name = f"{metric}{label}"
+                    else:
+                        new_name = metric
+                elif parts:
+                    new_name = parts[0]
+                else:
+                    new_name = ""
+            else:
+                new_name = str(column)
+
+            new_columns.append(
+                self._clean_column_name(new_name)
             )
-            if isinstance(col, tuple)
-            else str(col)
-            for col in result.columns
-        ]
+
+        result.columns = new_columns
 
         return result
 
     def _count(
         self,
         df,
-        group_by: list[str]
+        group_by: list[str],
     ) -> list[dict]:
 
         if not group_by:
@@ -103,14 +158,14 @@ class PandasTools:
         self._validate_columns(
             df=df,
             columns=group_by,
-            label="group_by"
+            label="group_by",
         )
 
         result = (
             df.groupby(group_by)
             .size()
-            .reset_index(name="count")
-            .sort_values("count", ascending=False)
+            .reset_index(name="Quantidade")
+            .sort_values("Quantidade", ascending=False)
             .head(20)
         )
 
@@ -121,7 +176,7 @@ class PandasTools:
         df,
         group_by: list[str],
         metric: list[str],
-        aggregation: list[str]
+        aggregation: list[str],
     ) -> list[dict]:
 
         if not group_by:
@@ -132,15 +187,15 @@ class PandasTools:
         self._validate_columns(
             df=df,
             columns=group_by,
-            label="group_by"
+            label="group_by",
         )
 
         if not metric:
             result = (
                 df.groupby(group_by)
                 .size()
-                .reset_index(name="count")
-                .sort_values("count", ascending=False)
+                .reset_index(name="Quantidade")
+                .sort_values("Quantidade", ascending=False)
                 .head(20)
             )
 
@@ -149,7 +204,7 @@ class PandasTools:
         self._validate_columns(
             df=df,
             columns=metric,
-            label="metric"
+            label="metric",
         )
 
         result = (
@@ -168,7 +223,7 @@ class PandasTools:
         if numeric_columns:
             result = result.sort_values(
                 numeric_columns[0],
-                ascending=False
+                ascending=False,
             )
 
         result = result.head(20)
@@ -182,7 +237,7 @@ class PandasTools:
         metric: list[str],
         aggregation: list[str],
         time_freq: str,
-        group_by: list[str] | None = None
+        group_by: list[str] | None = None,
     ) -> list[dict]:
 
         if not time_column:
@@ -199,7 +254,7 @@ class PandasTools:
 
         temp_df[time_column] = pd.to_datetime(
             temp_df[time_column],
-            errors="coerce"
+            errors="coerce",
         )
 
         temp_df = temp_df.dropna(
@@ -211,19 +266,19 @@ class PandasTools:
                 "Nenhuma data válida encontrada."
             )
 
-        temp_df["periodo"] = (
+        temp_df["Período"] = (
             temp_df[time_column]
             .dt.to_period(time_freq)
             .astype(str)
         )
 
-        group_columns = ["periodo"]
+        group_columns = ["Período"]
 
         if group_by:
             self._validate_columns(
                 df=temp_df,
                 columns=group_by,
-                label="group_by"
+                label="group_by",
             )
 
             group_columns.extend(group_by)
@@ -232,8 +287,8 @@ class PandasTools:
             result = (
                 temp_df.groupby(group_columns)
                 .size()
-                .reset_index(name="count")
-                .sort_values("periodo")
+                .reset_index(name="Quantidade")
+                .sort_values("Período")
                 .head(20)
             )
 
@@ -241,7 +296,7 @@ class PandasTools:
             self._validate_columns(
                 df=temp_df,
                 columns=metric,
-                label="metric"
+                label="metric",
             )
 
             result = (
@@ -253,18 +308,18 @@ class PandasTools:
             result = self._flatten_columns(result)
 
             result = result.sort_values(
-                "periodo"
+                "Período"
             ).head(20)
 
         if len(group_columns) > 1:
             result["label"] = (
                 result[group_columns]
                 .astype(str)
-                .agg(" - ".join, axis=1)
+                .agg(" | ".join, axis=1)
             )
         else:
             result["label"] = (
-                result["periodo"]
+                result["Período"]
                 .astype(str)
             )
 
@@ -273,7 +328,7 @@ class PandasTools:
     @staticmethod
     def rename_columns_df(
         df: pd.DataFrame,
-        rename_map: dict[str, str] | None
+        rename_map: dict[str, str] | None,
     ) -> pd.DataFrame:
 
         if df.empty:
@@ -296,11 +351,11 @@ class PandasTools:
         return df.rename(
             columns=safe_rename_map
         )
-        
+
     def execute_many(
         self,
         df,
-        plans: list[dict]
+        plans: list[dict],
     ) -> list[dict]:
 
         results = []
@@ -310,18 +365,18 @@ class PandasTools:
             try:
                 metrics = self.execute(
                     df=df,
-                    plan=plan
+                    plan=plan,
                 )
 
                 results.append({
                     "id": f"chart_{index + 1}",
                     "title": plan.get(
                         "title",
-                        f"Gráfico {index + 1}"
+                        f"Gráfico {index + 1}",
                     ),
                     "chart_type": plan.get(
                         "chart_type",
-                        "bar"
+                        "bar",
                     ),
                     "operation": plan.get(
                         "operation"
@@ -330,9 +385,9 @@ class PandasTools:
                     "y": plan.get("y"),
                     "reason": plan.get(
                         "reason",
-                        ""
+                        "",
                     ),
-                    "data": metrics
+                    "data": metrics,
                 })
 
             except Exception as error:
@@ -341,16 +396,14 @@ class PandasTools:
                     "id": f"chart_{index + 1}",
                     "title": plan.get(
                         "title",
-                        f"Gráfico {index + 1}"
+                        f"Gráfico {index + 1}",
                     ),
                     "chart_type": "none",
                     "operation": None,
                     "x": None,
                     "y": None,
                     "reason": str(error),
-                    "data": []
+                    "data": [],
                 })
 
         return results
-    
-   
