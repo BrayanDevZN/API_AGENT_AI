@@ -128,10 +128,14 @@ class Service:
             schema=schema,
         )
 
+        rename_columns = plan.get("rename_columns", {})
+
         chart_plans = plan.get("charts") or [plan]
 
-        all_charts_data = []
+        for chart_plan in chart_plans:
+            chart_plan["rename_columns"] = rename_columns
 
+        all_charts_data = []
         for index, chart_plan in enumerate(chart_plans):
             metrics = self.pandas_tools.execute(
                 df=df,

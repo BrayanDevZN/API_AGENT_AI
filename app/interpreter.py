@@ -53,7 +53,7 @@ class Interpreter:
 
     def dashboard_plan(self, prompt: str, schema: dict) -> dict:
         system_prompt = """
-Você é um planejador especialista em análise de dados e dashboards.
+Você é um planejador especialista em análise de dados, BI e dashboards.
 
 Sua função é transformar o pedido do usuário em um plano com UM OU MAIS gráficos.
 Você receberá o pedido do usuário e o schema do dataset.
@@ -64,9 +64,9 @@ Não explique fora do JSON.
 
 Formato obrigatório:
 {
-  "tool": "dashboard_plan | rename_columns",
+  "tool": "dashboard_plan",
   "rename_columns": {
-    "nome_original": "Nome Mais Intuitivo"
+    "nome_original": "Nome Intuitivo"
   },
   "charts": [
     {
@@ -85,25 +85,44 @@ Formato obrigatório:
   ]
 }
 
-TOOLS DISPONÍVEIS:
+REGRAS PARA rename_columns:
+- Sempre retorne rename_columns.
+- Use rename_columns para transformar nomes técnicos em nomes fáceis para clientes.
+- Nunca use underline (_), hífen (-), sufixos técnicos ou nomes de banco.
+- Nunca use nomes como valor_total_sum, receita_mean, quantidade_count, preco_max.
+- Os nomes finais devem ser nomes normais em português.
+- Use nomes curtos, claros e profissionais.
+- Se o nome original já for bom, pode manter igual.
+- Não altere o significado da coluna.
+- Não invente colunas.
+- As chaves de rename_columns devem ser EXATAMENTE os nomes originais existentes no schema.
+- Os valores de rename_columns devem ser os nomes amigáveis.
+- Depois de renomear, os gráficos devem usar os nomes novos em group_by, metric, x, y e time_column.
 
-1. dashboard_plan
-Use quando o usuário pedir análise, dashboard, gráfico, comparação, resumo, ranking, tendência ou visão geral.
-
-2. rename_columns
-Use quando as colunas tiverem nomes ruins, técnicos, abreviados ou pouco intuitivos.
+EXEMPLOS DE rename_columns:
+{
+  "Valor_Total": "Valor Total",
+  "valor_total": "Valor Total",
+  "Receita": "Receita",
+  "Data_Venda": "Data da Venda",
+  "Qtd": "Quantidade",
+  "Quantidade": "Quantidade",
+  "Preco": "Preço",
+  "Preco_Unitario": "Preço Unitário",
+  "Desconto_Medio": "Desconto Médio",
+  "Campanha_Nome": "Campanha",
+  "Nome_Produto": "Produto"
+}
 
 REGRAS GERAIS:
 - Retorne no máximo 4 gráficos.
 - Retorne pelo menos 1 gráfico quando houver dataset e pedido de análise.
-- Use apenas colunas existentes no schema.
+- Use apenas colunas existentes no schema ou nomes novos definidos em rename_columns.
 - Não invente colunas.
-- Se uma coluna tiver acento, espaço, underline ou letra maiúscula, copie exatamente como está.
+- Se uma coluna tiver acento, espaço, underline ou letra maiúscula, copie exatamente como está nas chaves de rename_columns.
 - group_by SEMPRE deve ser lista.
 - metric SEMPRE deve ser lista.
 - aggregation SEMPRE deve ser lista.
-- Se não precisar renomear colunas, retorne "rename_columns": {}.
-- Após renomear colunas, use os nomes novos nos gráficos.
 - Cada gráfico deve responder uma parte útil do pedido do usuário.
 - Evite gráficos repetidos com a mesma ideia.
 
@@ -128,8 +147,8 @@ REGRAS DE CHART_TYPE:
 - table: quando gráfico não for adequado ou quando o resultado for muito detalhado.
 
 REGRAS PARA ESCOLHER VÁRIOS GRÁFICOS:
-- Se o usuário pedir uma visão geral, crie 2 a 4 gráficos complementares.
-- Para vendas, considere gráficos como:
+- Se o usuário pedir uma visão geral ou não enviar prompt específico, crie 2 a 4 gráficos complementares.
+- Para vendas, considere:
   1. total por produto/categoria
   2. evolução no tempo se houver data
   3. participação por categoria
@@ -138,7 +157,7 @@ REGRAS PARA ESCOLHER VÁRIOS GRÁFICOS:
   1. receita por campanha
   2. conversões por campanha
   3. evolução por período
-  4. taxa ou média se existir coluna adequada
+  4. média ou taxa se existir coluna adequada
 - Para dados financeiros, considere:
   1. receita/despesa por categoria
   2. evolução temporal
@@ -154,7 +173,7 @@ IMPORTANTE:
 
         user_prompt = f"""
 Pedido do usuário:
-{prompt}
+{prompt if prompt and prompt.strip() else "Faça uma análise geral completa do dataset, como um analista de dados."}
 
 Schema:
 {json.dumps(schema, ensure_ascii=False)}
@@ -217,17 +236,36 @@ Formato obrigatório:
   "mode": "analysis | chat",
   "reason": "explicacao_curta",
   "rename_columns": {{
-    "nome_original": "Nome Mais Intuitivo"
+    "nome_original": "Nome Intuitivo"
   }}
 }}
 
+REGRAS PARA rename_columns:
+- Sempre retorne rename_columns.
+- Use nomes normais em português.
+- Nunca use underline (_).
+- Nunca use hífen (-).
+- Nunca use nomes técnicos.
+- Nunca use sufixos como sum, mean, count, max, min.
+- As chaves devem ser exatamente nomes existentes nas colunas disponíveis.
+- Os valores devem ser nomes amigáveis para cliente final.
+- Depois de renomear, use os nomes novos em x e y.
+
+Exemplos:
+Valor_Total -> Valor Total
+valor_total -> Valor Total
+Quantidade -> Quantidade
+Qtd -> Quantidade
+Data_Venda -> Data da Venda
+Preco_Unitario -> Preço Unitário
+Campanha_Nome -> Campanha
+Nome_Produto -> Produto
+
 Regras:
-- Use apenas colunas existentes.
+- Use apenas colunas existentes ou nomes novos definidos em rename_columns.
 - Não invente colunas.
 - Para count, y deve ser null.
 - Se for conversa comum, use chart_type "none".
-- Se não precisar renomear, retorne "rename_columns": {{}}.
-- Após renomear colunas, use os nomes novos em x e y.
 - Para comparação comum, use bar.
 - Para ranking com nomes longos, use horizontal_bar.
 - Para evolução temporal, use line.
