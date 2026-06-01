@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from openai import OpenAI
 from core.config import Settings
 
@@ -40,15 +41,28 @@ class Interpreter:
 
     MAX_CHARTS = 10
 
+    METRIC_ALIASES = {
+        "cliques": ["clique", "cliques", "click", "clicks"],
+        "impressões": ["impressao", "impressoes", "impressão", "impressões", "impression", "impressions"],
+        "conversões": ["conversao", "conversoes", "conversão", "conversões", "conversion", "conversions"],
+        "receita": ["receita", "faturamento", "revenue", "valor total", "total receita"],
+        "investimento": ["investimento", "gasto", "custo", "spend", "cost"],
+        "vendas": ["venda", "vendas", "sales"],
+        "quantidade": ["quantidade", "qtd", "volume", "quantity"],
+        "pedidos": ["pedido", "pedidos", "orders"],
+        "clientes": ["cliente", "clientes", "customers"],
+    }
+
     def __init__(self):
         self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
         self.model = Settings.OPENAI_MODEL
 
     def run(self, question: str, columns: list[str], messages: list) -> dict:
-        if not columns:
-            prompt = self._chat_prompt(question, messages)
-        else:
-            prompt = self._analysis_prompt(question, columns, messages)
+        prompt = (
+            self._analysis_prompt(question, columns, messages)
+            if columns
+            else self._chat_prompt(question, messages)
+        )
 
         response = self.client.responses.create(
             model=self.model,
@@ -62,20 +76,13 @@ class Interpreter:
 Você é um planejador especialista em visualização de dados.
 
 Sua função NÃO é escrever análise.
-Sua função é escolher os melhores gráficos para que outro agente consiga analisar o dataset depois.
-
-Você deve pensar como um analista de BI:
-1. entender o tipo de dataset;
-2. identificar colunas categóricas, numéricas e temporais;
-3. escolher gráficos úteis;
-4. evitar gráficos ruins;
-5. criar um plano visual claro.
+Sua função é escolher gráficos coerentes para outro agente analisar depois.
 
 Responda SOMENTE em JSON válido.
 Não use markdown.
 Não explique fora do JSON.
 
-FORMATO OBRIGATÓRIO:
+FORMATO:
 {
   "tool": "dashboard_plan",
   "dataset_type": "marketing | vendas | financeiro | ecommerce | rh | atendimento | produto | operacional | generico",
@@ -84,91 +91,44 @@ FORMATO OBRIGATÓRIO:
   },
   "charts": [
     {
-      "title": "Título claro do gráfico",
+      "title": "Título claro e coerente",
       "operation": "groupby | count | time_groupby | scatter | kpi | table",
       "chart_type": "bar | horizontal_bar | line | area | pie | donut | scatter | table | kpi",
       "group_by": ["coluna_categorica"],
       "metric": ["coluna_numerica"],
       "aggregation": ["sum"],
-      "x": "coluna_eixo_x_ou_null",
-      "y": "coluna_eixo_y_ou_null",
+      "x": "coluna_x_ou_null",
+      "y": "coluna_y_ou_null",
       "time_column": "coluna_data_ou_null",
       "time_freq": "D | W | M | Q | Y",
       "limit": 10,
       "sort": "desc | asc | none",
-      "reason": "motivo curto da escolha"
+      "reason": "motivo curto"
     }
   ]
 }
 
-REGRAS ABSOLUTAS:
+REGRAS:
 - Use apenas colunas existentes no schema.
 - Nunca invente coluna.
-- Nunca use coluna derivada que não exista.
-- Não crie ROI, lucro, margem, ticket médio, CTR ou taxa de conversão se essas colunas não existirem.
-- Se quiser sugerir métrica derivada, coloque apenas em reason, mas NÃO use como metric.
-- group_by sempre deve ser lista.
-- metric sempre deve ser lista.
-- aggregation sempre deve ser lista.
-- Para count, metric deve ser [] e aggregation deve ser ["count"].
+- Não use métrica derivada se ela não existir.
+- O título precisa combinar com metric, group_by e aggregation.
+- Se o título falar cliques, use coluna de cliques.
+- Se o título falar receita, use coluna de receita.
+- Se o título falar conversões, use coluna de conversões.
+- Se não existir a métrica citada no título, mude o título.
+- Para count, metric deve ser [] e aggregation ["count"].
 - Para kpi, chart_type deve ser "kpi".
-- Para scatter, precisa de 2 colunas numéricas reais.
-- Para time_groupby, precisa de coluna temporal real.
-- Retorne entre 3 e 10 gráficos quando o dataset permitir.
-- Se o dataset for muito simples, retorne menos gráficos.
-- Se não houver coluna numérica, priorize count e table.
-- Se não houver coluna temporal, não use line nem area por tempo.
-- O objetivo é gerar gráficos úteis, não muitos gráficos inúteis.
-
-REGRAS DE ESCOLHA DE GRÁFICO:
-- bar: comparação entre poucas/médias categorias.
-- horizontal_bar: ranking, top N, nomes longos ou muitas categorias.
-- line: evolução temporal de uma métrica.
-- area: evolução temporal de volume ou tendência acumulada.
-- pie: participação percentual com no máximo 6 categorias.
-- donut: igual pie, só quando fizer sentido visual.
-- scatter: relação entre duas métricas numéricas.
-- table: quando há muitas categorias ou quando gráfico ficaria confuso.
-- kpi: valor único importante, como soma, média, máximo, mínimo ou contagem.
-
-REGRAS PARA EVITAR GRÁFICOS RUINS:
-- Não use pie/donut com muitas categorias.
-- Não use line sem coluna de data.
-- Não use scatter com coluna categórica.
-- Não use bar com mais de 15 categorias sem limit.
-- Para ranking, use horizontal_bar com limit entre 5 e 15.
-- Para distribuição temporal, use line ou area.
-- Para composição percentual, use pie/donut apenas com poucas categorias.
-- Para dataset desconhecido, monte visão geral: KPIs, ranking, comparação por categoria e evolução temporal se houver data.
-
-ESTRATÉGIA PARA DATASETS COMUNS:
-
-MARKETING:
-- KPIs: soma de impressões, cliques, conversões, receita, investimento se existirem.
-- Gráficos úteis: evolução temporal, ranking por campanha, comparação por canal, relação investimento x receita.
-- Evite pizza por data.
-
-VENDAS / ECOMMERCE:
-- KPIs: receita, quantidade, pedidos, clientes.
-- Gráficos úteis: receita por produto/categoria, vendas por região, evolução por mês, top produtos/clientes.
-
-FINANCEIRO:
-- KPIs: receita, custo, despesa, lucro se existir.
-- Gráficos úteis: evolução mensal, gastos por categoria, receitas por fonte, ranking de maiores valores.
-
-RH:
-- KPIs: funcionários, salário médio, admissões, desligamentos se existirem.
-- Gráficos úteis: funcionários por área, salário por cargo, evolução de admissões.
-
-ATENDIMENTO:
-- KPIs: tickets, tempo médio, satisfação, resolvidos.
-- Gráficos úteis: chamados por status, canal, prioridade, evolução temporal.
-
-REGRAS PARA rename_columns:
-- Sempre retorne rename_columns.
-- Chaves devem ser exatamente colunas existentes.
-- Valores devem ser nomes amigáveis.
-- Os gráficos devem usar os nomes originais, nunca os nomes amigáveis.
+- Para scatter, use duas colunas numéricas.
+- Para time_groupby, use coluna temporal real.
+- Não use pie/donut com mais de 6 categorias.
+- Não use line sem data.
+- Não use scatter com texto.
+- Ranking deve usar horizontal_bar.
+- Evolução temporal deve usar line ou area.
+- Retorne entre 3 e 10 gráficos úteis.
+- Se o dataset for simples, retorne menos.
+- rename_columns é só visual. Os gráficos usam nomes originais.
 """
 
         user_prompt = f"""
@@ -191,12 +151,7 @@ Schema:
 
     def _chat_prompt(self, question: str, messages: list) -> str:
         return f"""
-Você é um interpretador de intenção.
-
-Não existe dataset disponível.
-Então responda como conversa normal.
-
-Responda SOMENTE em JSON válido.
+Responda SOMENTE JSON válido.
 
 {{
   "chart_type": "none",
@@ -217,9 +172,9 @@ Histórico:
 
     def _analysis_prompt(self, question: str, columns: list[str], messages: list) -> str:
         return f"""
-Você é um interpretador de intenção para análise de dados.
+Você interpreta pedidos de gráfico.
 
-Responda SOMENTE em JSON válido.
+Responda SOMENTE JSON válido.
 
 {{
   "chart_type": "bar | horizontal_bar | line | area | pie | donut | scatter | table | kpi | none",
@@ -236,16 +191,14 @@ Responda SOMENTE em JSON válido.
 REGRAS:
 - Use apenas colunas existentes.
 - Não invente métricas.
-- Se for conversa comum, use mode chat.
-- Se for pedido sobre dados, use mode analysis.
 - Para count, y deve ser null.
-- Para gráfico, x deve ser coluna real.
 - Para sum/mean/max/min/median, y deve ser coluna real.
+- Se for conversa comum, mode chat.
 
 Pergunta:
 {question}
 
-Colunas disponíveis:
+Colunas:
 {json.dumps(columns, ensure_ascii=False)}
 
 Histórico:
@@ -255,14 +208,15 @@ Histórico:
     def _as_list(self, value):
         if value is None:
             return []
-
         if isinstance(value, list):
-            return [item for item in value if item is not None and item != ""]
-
+            return [item for item in value if item not in [None, ""]]
         return [value]
 
     def _normalize_name(self, value) -> str:
-        return str(value).strip().lower()
+        text = str(value).strip().lower()
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        return text
 
     def _schema_columns(self, schema: dict) -> list[str]:
         columns = schema.get("columns") or schema.get("colunas") or []
@@ -270,40 +224,36 @@ Histórico:
         if isinstance(columns, dict):
             return list(columns.keys())
 
-        if isinstance(columns, list):
-            result = []
+        result = []
 
+        if isinstance(columns, list):
             for item in columns:
                 if isinstance(item, str):
                     result.append(item)
-
                 elif isinstance(item, dict):
                     name = item.get("name") or item.get("column") or item.get("nome")
                     if name:
                         result.append(name)
 
-            return result
-
-        return []
+        return result
 
     def _numeric_columns(self, schema: dict, columns: list[str]) -> list[str]:
         for key in ["numeric_columns", "numerical_columns", "numeric", "numericas", "numéricas"]:
             values = schema.get(key)
-
             if isinstance(values, list):
                 return [value for value in values if value in columns]
 
         typed_columns = schema.get("columns") or schema.get("colunas")
 
-        if isinstance(typed_columns, list):
-            result = []
+        result = []
 
+        if isinstance(typed_columns, list):
             for item in typed_columns:
                 if not isinstance(item, dict):
                     continue
 
                 name = item.get("name") or item.get("column") or item.get("nome")
-                dtype = str(item.get("type") or item.get("dtype") or "").lower()
+                dtype = self._normalize_name(item.get("type") or item.get("dtype") or "")
 
                 if name in columns and any(term in dtype for term in [
                     "int",
@@ -315,14 +265,11 @@ Histórico:
                 ]):
                     result.append(name)
 
-            return result
-
-        return []
+        return result
 
     def _date_columns(self, schema: dict, columns: list[str]) -> list[str]:
         for key in ["date_columns", "datetime_columns", "data_columns", "datas"]:
             values = schema.get(key)
-
             if isinstance(values, list):
                 return [value for value in values if value in columns]
 
@@ -330,13 +277,11 @@ Histórico:
 
         for column in columns:
             name = self._normalize_name(column)
-
             if any(term in name for term in [
                 "data",
                 "date",
                 "dia",
                 "mes",
-                "mês",
                 "ano",
                 "created",
                 "updated",
@@ -346,10 +291,15 @@ Histórico:
 
         return result
 
-    def _categorical_columns(self, schema: dict, columns: list[str], numeric_columns: list[str], date_columns: list[str]) -> list[str]:
+    def _categorical_columns(
+        self,
+        schema: dict,
+        columns: list[str],
+        numeric_columns: list[str],
+        date_columns: list[str],
+    ) -> list[str]:
         for key in ["categorical_columns", "categoricas", "categóricas", "categories"]:
             values = schema.get(key)
-
             if isinstance(values, list):
                 return [value for value in values if value in columns]
 
@@ -371,15 +321,15 @@ Histórico:
     def _first_existing(self, values, columns: list[str]) -> str | None:
         for value in self._as_list(values):
             found = self._find_column(value, columns)
-
             if found:
                 return found
-
         return None
 
     def _preferred_column(self, columns: list[str], preferred_names: list[str]) -> str | None:
         if not columns:
             return None
+
+        preferred_names = [self._normalize_name(name) for name in preferred_names]
 
         for preferred in preferred_names:
             for column in columns:
@@ -392,6 +342,43 @@ Histórico:
                     return column
 
         return columns[0]
+
+    def _metric_from_title(self, title: str, numeric_columns: list[str]) -> str | None:
+        normalized_title = self._normalize_name(title)
+
+        if not normalized_title:
+            return None
+
+        for column in numeric_columns:
+            column_name = self._normalize_name(column)
+
+            if column_name in normalized_title:
+                return column
+
+        for column in numeric_columns:
+            column_name = self._normalize_name(column)
+
+            for aliases in self.METRIC_ALIASES.values():
+                normalized_aliases = [self._normalize_name(alias) for alias in aliases]
+
+                column_matches_alias = any(alias in column_name for alias in normalized_aliases)
+                title_matches_alias = any(alias in normalized_title for alias in normalized_aliases)
+
+                if column_matches_alias and title_matches_alias:
+                    return column
+
+        return None
+
+    def _category_from_title(self, title: str, categorical_columns: list[str]) -> str | None:
+        normalized_title = self._normalize_name(title)
+
+        for column in categorical_columns:
+            column_name = self._normalize_name(column)
+
+            if column_name in normalized_title:
+                return column
+
+        return None
 
     def _clean_rename_columns(self, rename_columns: dict, columns: list[str]) -> dict:
         if not isinstance(rename_columns, dict):
@@ -469,6 +456,13 @@ Histórico:
         categorical_columns: list[str],
         date_columns: list[str],
     ) -> dict | None:
+        title = chart.get("title")
+
+        if not isinstance(title, str) or not title.strip():
+            title = f"Gráfico {index + 1}"
+
+        title = title.strip()
+
         operation = chart.get("operation") or "groupby"
         chart_type = chart.get("chart_type") or "bar"
 
@@ -481,10 +475,7 @@ Histórico:
         aggregation = [
             agg for agg in self._as_list(chart.get("aggregation"))
             if agg in self.VALID_AGGREGATIONS
-        ]
-
-        if not aggregation:
-            aggregation = ["sum"]
+        ] or ["sum"]
 
         time_freq = chart.get("time_freq") or "M"
 
@@ -496,6 +487,9 @@ Histórico:
         x = self._find_column(chart.get("x"), columns)
         y = self._find_column(chart.get("y"), columns)
         time_column = self._find_column(chart.get("time_column"), columns)
+
+        title_metric = self._metric_from_title(title, numeric_columns)
+        title_category = self._category_from_title(title, categorical_columns)
 
         preferred_category = self._preferred_column(
             categorical_columns,
@@ -545,7 +539,6 @@ Histórico:
                 "date",
                 "dia",
                 "mes",
-                "mês",
                 "ano",
                 "created_at",
                 "timestamp",
@@ -553,7 +546,7 @@ Histórico:
         )
 
         if operation == "kpi":
-            metric = metric or y or preferred_metric
+            metric = title_metric or metric or y or preferred_metric
 
             if not metric:
                 return None
@@ -567,6 +560,8 @@ Histórico:
 
             if aggregation == ["none"]:
                 aggregation = ["sum"]
+
+            title = self._coherent_title(title, operation, metric, None, aggregation[0])
 
         elif operation == "scatter":
             nums = []
@@ -589,6 +584,7 @@ Histórico:
             group_by_list = []
             aggregation = ["none"]
             time_column = None
+            title = f"Relação entre {x} e {y}"
 
         elif operation == "time_groupby":
             time_column = time_column or x or preferred_date
@@ -596,7 +592,7 @@ Histórico:
             if time_column not in date_columns:
                 return None
 
-            metric = metric or y or preferred_metric
+            metric = title_metric or metric or y or preferred_metric
 
             if metric:
                 metric_list = [metric]
@@ -615,8 +611,10 @@ Histórico:
             if chart_type not in ["line", "area", "bar"]:
                 chart_type = "line"
 
+            title = self._coherent_title(title, operation, metric or "Registros", time_column, aggregation[0])
+
         elif operation == "count":
-            group_by = group_by or x or preferred_category
+            group_by = title_category or group_by or x or preferred_category
 
             if not group_by:
                 return None
@@ -628,11 +626,12 @@ Histórico:
             group_by_list = [group_by]
             aggregation = ["count"]
             time_column = None
+            title = f"Quantidade por {group_by}"
 
         elif operation == "table":
             chart_type = "table"
-            group_by = group_by or x or preferred_category
-            metric = metric or y or preferred_metric
+            group_by = title_category or group_by or x or preferred_category
+            metric = title_metric or metric or y or preferred_metric
 
             if not group_by and not metric:
                 return None
@@ -645,8 +644,8 @@ Histórico:
 
         else:
             operation = "groupby"
-            group_by = group_by or x or preferred_category
-            metric = metric or y or preferred_metric
+            group_by = title_category or group_by or x or preferred_category
+            metric = title_metric or metric or y or preferred_metric
 
             if not group_by:
                 return None
@@ -656,12 +655,15 @@ Histórico:
                 aggregation = ["count"]
                 metric_list = []
                 y = "count"
+                title = f"Quantidade por {group_by}"
             else:
                 metric_list = [metric]
                 y = metric
 
-                if aggregation == ["none"] or aggregation == ["count"]:
+                if aggregation in [["none"], ["count"]]:
                     aggregation = ["sum"]
+
+                title = self._coherent_title(title, operation, metric, group_by, aggregation[0])
 
             x = group_by
             group_by_list = [group_by]
@@ -670,40 +672,14 @@ Histórico:
             if chart_type not in ["bar", "horizontal_bar", "pie", "donut", "table"]:
                 chart_type = "bar"
 
-        limit = chart.get("limit", 10)
-
-        try:
-            limit = int(limit)
-        except Exception:
-            limit = 10
-
-        if limit < 3:
-            limit = 3
-
-        if limit > 20:
-            limit = 20
-
+        limit = self._normalize_limit(chart.get("limit", 10), chart_type)
         sort = chart.get("sort", "desc")
 
         if sort not in ["desc", "asc", "none"]:
             sort = "desc"
 
-        if chart_type in ["pie", "donut"]:
-            limit = min(limit, 6)
-
-        if chart_type == "bar":
-            limit = min(limit, 12)
-
-        if chart_type == "horizontal_bar":
-            limit = min(limit, 15)
-
-        title = chart.get("title")
-
-        if not isinstance(title, str) or not title.strip():
-            title = f"Gráfico {index + 1}"
-
         return {
-            "title": title.strip(),
+            "title": title,
             "operation": operation,
             "group_by": group_by_list,
             "metric": metric_list,
@@ -718,6 +694,55 @@ Histórico:
             "reason": chart.get("reason", ""),
         }
 
+    def _coherent_title(self, title: str, operation: str, metric: str | None, group_or_time: str | None, aggregation: str) -> str:
+        if not metric:
+            return title
+
+        agg_names = {
+            "sum": "Total de",
+            "mean": "Média de",
+            "max": "Maior valor de",
+            "min": "Menor valor de",
+            "median": "Mediana de",
+            "count": "Quantidade de",
+            "none": "",
+        }
+
+        prefix = agg_names.get(aggregation, "Total de")
+
+        if operation == "time_groupby" and group_or_time:
+            return f"{prefix} {metric} ao longo do tempo"
+
+        if operation == "groupby" and group_or_time:
+            return f"{prefix} {metric} por {group_or_time}"
+
+        if operation == "kpi":
+            return f"{prefix} {metric}"
+
+        return title
+
+    def _normalize_limit(self, value, chart_type: str) -> int:
+        try:
+            limit = int(value)
+        except Exception:
+            limit = 10
+
+        limit = max(1, min(limit, 20))
+
+        if chart_type in ["pie", "donut"]:
+            return min(limit, 6)
+
+        if chart_type == "bar":
+            return min(limit, 12)
+
+        if chart_type == "horizontal_bar":
+            return min(limit, 15)
+
+        if chart_type == "kpi":
+            return 1
+
+        return limit
+
     def _fallback_charts(
         self,
         numeric_columns: list[str],
@@ -726,36 +751,20 @@ Histórico:
     ) -> list[dict]:
         charts = []
 
-        main_metric = self._preferred_column(numeric_columns, [
-            "receita",
-            "valor",
-            "total",
-            "vendas",
-            "quantidade",
-            "cliques",
-            "conversões",
-            "conversoes",
-        ])
+        main_metric = self._preferred_column(
+            numeric_columns,
+            ["receita", "valor", "total", "vendas", "quantidade", "cliques", "conversões", "conversoes"],
+        )
 
-        main_category = self._preferred_column(categorical_columns, [
-            "categoria",
-            "produto",
-            "campanha",
-            "canal",
-            "cliente",
-            "região",
-            "regiao",
-            "status",
-        ])
+        main_category = self._preferred_column(
+            categorical_columns,
+            ["categoria", "produto", "campanha", "canal", "cliente", "região", "regiao", "status"],
+        )
 
-        main_date = self._preferred_column(date_columns, [
-            "data",
-            "date",
-            "dia",
-            "mês",
-            "mes",
-            "ano",
-        ])
+        main_date = self._preferred_column(
+            date_columns,
+            ["data", "date", "dia", "mes", "ano"],
+        )
 
         if main_metric:
             charts.append({
@@ -771,12 +780,12 @@ Histórico:
                 "time_freq": "M",
                 "limit": 1,
                 "sort": "none",
-                "reason": "KPI geral para resumir a principal métrica numérica.",
+                "reason": "Resumo da principal métrica numérica.",
             })
 
         if main_category and main_metric:
             charts.append({
-                "title": f"{main_metric} por {main_category}",
+                "title": f"Total de {main_metric} por {main_category}",
                 "operation": "groupby",
                 "group_by": [main_category],
                 "metric": [main_metric],
@@ -788,12 +797,12 @@ Histórico:
                 "time_freq": "M",
                 "limit": 10,
                 "sort": "desc",
-                "reason": "Ranking das principais categorias por métrica.",
+                "reason": "Ranking por categoria.",
             })
 
         if main_date and main_metric:
             charts.append({
-                "title": f"Evolução de {main_metric} ao longo do tempo",
+                "title": f"Total de {main_metric} ao longo do tempo",
                 "operation": "time_groupby",
                 "group_by": [main_date],
                 "metric": [main_metric],
@@ -805,24 +814,7 @@ Histórico:
                 "time_freq": "M",
                 "limit": 12,
                 "sort": "asc",
-                "reason": "Tendência temporal da principal métrica.",
-            })
-
-        if main_category and not main_metric:
-            charts.append({
-                "title": f"Quantidade por {main_category}",
-                "operation": "count",
-                "group_by": [main_category],
-                "metric": [],
-                "aggregation": ["count"],
-                "chart_type": "bar",
-                "x": main_category,
-                "y": "count",
-                "time_column": None,
-                "time_freq": "M",
-                "limit": 10,
-                "sort": "desc",
-                "reason": "Contagem por categoria disponível.",
+                "reason": "Tendência temporal.",
             })
 
         if len(numeric_columns) >= 2:
@@ -842,6 +834,23 @@ Histórico:
                 "reason": "Relação entre duas variáveis numéricas.",
             })
 
+        if main_category and not main_metric:
+            charts.append({
+                "title": f"Quantidade por {main_category}",
+                "operation": "count",
+                "group_by": [main_category],
+                "metric": [],
+                "aggregation": ["count"],
+                "chart_type": "bar",
+                "x": main_category,
+                "y": "count",
+                "time_column": None,
+                "time_freq": "M",
+                "limit": 10,
+                "sort": "desc",
+                "reason": "Contagem por categoria.",
+            })
+
         return charts
 
     def _safe_dashboard_plan(self, output_text: str, schema: dict) -> dict:
@@ -854,11 +863,6 @@ Histórico:
             data = json.loads(output_text)
         except Exception:
             data = {}
-
-        tool = data.get("tool", "dashboard_plan")
-
-        if tool not in ["dashboard_plan", "chart_plan"]:
-            tool = "dashboard_plan"
 
         raw_charts = data.get("charts", [])
 
@@ -895,7 +899,6 @@ Histórico:
 
         if not charts:
             fallback_x = columns[0] if columns else None
-
             charts = [{
                 "title": "Tabela de dados",
                 "operation": "table",
@@ -909,7 +912,7 @@ Histórico:
                 "time_freq": "M",
                 "limit": 20,
                 "sort": "none",
-                "reason": "Não havia colunas suficientes para um gráfico estatístico útil.",
+                "reason": "Não havia colunas suficientes para gráfico útil.",
             }]
 
         first_chart = charts[0]
