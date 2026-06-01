@@ -40,10 +40,10 @@ class Analyzer:
         if df.empty:
             return self._empty_chart(interpretation)
 
+        df = self._normalize_dataframe_columns(df)
+
         chart_type = interpretation.get("chart_type", "none")
         operation = interpretation.get("operation")
-        x = interpretation.get("x")
-        y = interpretation.get("y")
         aggregation = self._get_first_value(
             interpretation.get("aggregation", "none")
         )
@@ -97,12 +97,43 @@ class Analyzer:
                 continue
 
             chart["id"] = chart_spec.get("id") or f"chart_{index + 1}"
-            chart["title"] = chart_spec.get("title") or chart.get("title") or f"Gráfico {index + 1}"
+            chart["title"] = (
+                chart_spec.get("title")
+                or chart.get("title")
+                or f"Gráfico {index + 1}"
+            )
             chart["reason"] = chart_spec.get("reason", "")
 
             results.append(chart)
 
         return results
+
+    def _normalize_dataframe_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df.columns = [str(column).strip() for column in df.columns]
+        return df
+
+    def _normalize_name(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        return str(value).strip().lower()
+
+    def _find_column(self, df: pd.DataFrame, column: str | None) -> str | None:
+        if not column:
+            return None
+
+        target = self._normalize_name(column)
+
+        for real_column in df.columns:
+            if self._normalize_name(real_column) == target:
+                return real_column
+
+        return None
+
+    def _resolve_column(self, df: pd.DataFrame, value) -> str | None:
+        column = self._get_first_column(value)
+        return self._find_column(df, column)
 
     def _empty_chart(self, interpretation: dict | None = None) -> dict:
         interpretation = interpretation or {}
@@ -135,14 +166,25 @@ class Analyzer:
 
         return value
 
-    def _column_exists(self, df: pd.DataFrame, column: str | None) -> bool:
-        return bool(column) and column in df.columns
-
     def _sort_result(self, result: pd.DataFrame, y: str | None) -> pd.DataFrame:
         if y and y in result.columns:
             return result.sort_values(by=y, ascending=False).head(20)
 
         return result.head(20)
+
+    def _get_first_numeric_column(self, df: pd.DataFrame) -> str | None:
+        numeric_columns = df.select_dtypes(include="number").columns.tolist()
+
+        if numeric_columns:
+            return numeric_columns[0]
+
+        for column in df.columns:
+            converted = pd.to_numeric(df[column], errors="coerce")
+
+            if converted.notna().sum() > 0:
+                return column
+
+        return None
 
     def _count(
         self,
@@ -150,13 +192,12 @@ class Analyzer:
         chart_type: str,
         interpretation: dict,
     ) -> dict:
-        x = interpretation.get("x")
+        x = self._resolve_column(df, interpretation.get("x"))
 
-        if not self._column_exists(df, x):
-            group_by = interpretation.get("group_by", [])
-            x = self._get_first_column(group_by)
+        if not x:
+            x = self._resolve_column(df, interpretation.get("group_by", []))
 
-        if not self._column_exists(df, x):
+        if not x:
             return self._empty_chart(interpretation)
 
         result = (
@@ -186,18 +227,19 @@ class Analyzer:
         interpretation: dict,
         aggregation: str,
     ) -> dict:
-        x = interpretation.get("x")
-        y = interpretation.get("y")
+        x = self._resolve_column(df, interpretation.get("x"))
+        y = self._resolve_column(df, interpretation.get("y"))
 
-        if not self._column_exists(df, x):
-            group_by = interpretation.get("group_by", [])
-            x = self._get_first_column(group_by)
+        if not x:
+            x = self._resolve_column(df, interpretation.get("group_by", []))
 
-        if not self._column_exists(df, y):
-            metric = interpretation.get("metric", [])
-            y = self._get_first_column(metric)
+        if not y:
+            y = self._resolve_column(df, interpretation.get("metric", []))
 
-        if not self._column_exists(df, x) or not self._column_exists(df, y):
+        if not y:
+            y = self._get_first_numeric_column(df)
+
+        if not x or not y:
             return self._empty_chart(interpretation)
 
         df = df.copy()
@@ -238,24 +280,26 @@ class Analyzer:
         chart_type: str,
         interpretation: dict,
     ) -> dict:
-        time_column = interpretation.get("time_column")
-        y = interpretation.get("y")
+        time_column = self._resolve_column(df, interpretation.get("time_column"))
+        y = self._resolve_column(df, interpretation.get("y"))
         time_freq = interpretation.get("time_freq", "M")
         aggregation = self._get_first_value(
             interpretation.get("aggregation", "sum")
         )
 
-        if not self._column_exists(df, time_column):
+        if not time_column:
             return self._empty_chart(interpretation)
 
-        if not self._column_exists(df, y):
-            metric = interpretation.get("metric", [])
-            y = self._get_first_column(metric)
+        if not y:
+            y = self._resolve_column(df, interpretation.get("metric", []))
 
         if aggregation == "count":
             y = "count"
 
-        if aggregation != "count" and not self._column_exists(df, y):
+        if aggregation != "count" and not y:
+            y = self._get_first_numeric_column(df)
+
+        if aggregation != "count" and not y:
             return self._empty_chart(interpretation)
 
         if time_freq not in ["D", "M", "Y"]:
