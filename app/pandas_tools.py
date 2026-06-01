@@ -2,107 +2,102 @@ import pandas as pd
 
 
 class PandasTools:
-    AGGREGATION_LABELS = {
-        "sum": "",
-        "mean": " Médio",
-        "avg": " Médio",
-        "count": " Quantidade",
-        "max": " Máximo",
-        "min": " Mínimo",
+    VALID_OPERATIONS = {
+        "groupby",
+        "count",
+        "time_groupby",
+        "scatter",
+        "kpi",
+        "table",
     }
 
-    PREFERRED_CATEGORICAL_COLUMNS = [
-        "campanha",
-        "produto",
-        "categoria",
-        "canal",
-        "região",
-        "regiao",
-        "cidade",
-        "cliente",
-        "vendedor",
-        "status",
-        "forma pagamento",
-        "forma_pagamento",
-    ]
-
-    PREFERRED_NUMERIC_COLUMNS = [
-        "receita",
-        "valor",
-        "valor total",
-        "valor_total",
-        "roi",
-        "conversões",
-        "conversoes",
-        "vendas",
-        "quantidade",
-        "investimento",
-        "custo",
-        "lucro",
-    ]
+    VALID_AGGREGATIONS = {
+        "sum",
+        "mean",
+        "avg",
+        "count",
+        "max",
+        "min",
+        "median",
+        "none",
+    }
 
     def execute(self, df, plan: dict) -> list[dict]:
         if df is None or df.empty:
             return []
 
+        if not isinstance(plan, dict):
+            return []
+
         df = self._normalize_dataframe_columns(df)
-
-        rename_columns = plan.get("rename_columns", {})
-
-        df = self.rename_columns_df(
-            df=df,
-            rename_map=rename_columns,
-        )
 
         operation = plan.get("operation") or "groupby"
 
-        group_by = self._normalize_list(
-            plan.get("group_by")
-        )
+        if operation not in self.VALID_OPERATIONS:
+            operation = "groupby"
 
-        metric = self._normalize_list(
-            plan.get("metric")
-        )
+        aggregation = self._first_value(plan.get("aggregation", ["sum"]))
 
-        aggregation = self._normalize_list(
-            plan.get("aggregation", ["count"])
-        )
+        if aggregation == "avg":
+            aggregation = "mean"
 
-        aggregation = self._sanitize_aggregations(aggregation)
+        if aggregation not in self.VALID_AGGREGATIONS:
+            aggregation = "sum"
 
-        time_column = plan.get("time_column")
-        time_freq = plan.get("time_freq", "M")
-
-        if operation == "count":
-            return self._count(
-                df=df,
-                group_by=group_by,
-            )
-
-        if operation == "groupby":
-            return self._groupby(
-                df=df,
-                group_by=group_by,
-                metric=metric,
-                aggregation=aggregation,
-            )
+        if operation == "count" or aggregation == "count":
+            return self._count(df, plan)
 
         if operation == "time_groupby":
-            return self._time_groupby(
-                df=df,
-                time_column=time_column,
-                metric=metric,
-                aggregation=aggregation,
-                time_freq=time_freq,
-                group_by=group_by,
-            )
+            return self._time_groupby(df, plan, aggregation)
 
-        return self._groupby(
-            df=df,
-            group_by=group_by,
-            metric=metric,
-            aggregation=aggregation,
-        )
+        if operation == "scatter":
+            return self._scatter(df, plan)
+
+        if operation == "kpi":
+            return self._kpi(df, plan, aggregation)
+
+        if operation == "table":
+            return self._table(df, plan)
+
+        return self._groupby(df, plan, aggregation)
+
+    def execute_many(self, df, plans: list[dict]) -> list[dict]:
+        results = []
+
+        for index, plan in enumerate(plans or []):
+            try:
+                metrics = self.execute(df=df, plan=plan)
+
+                results.append({
+                    "id": f"chart_{index + 1}",
+                    "title": plan.get("title", f"Gráfico {index + 1}"),
+                    "chart_type": plan.get("chart_type", "bar") if metrics else "none",
+                    "operation": plan.get("operation"),
+                    "x": plan.get("x"),
+                    "y": plan.get("y"),
+                    "metric": plan.get("metric"),
+                    "group_by": plan.get("group_by"),
+                    "aggregation": plan.get("aggregation"),
+                    "reason": plan.get("reason", "") if metrics else "Não foi possível gerar dados para este gráfico.",
+                    "data": metrics,
+                })
+
+            except Exception as error:
+                results.append({
+                    "id": f"chart_{index + 1}",
+                    "title": plan.get("title", f"Gráfico {index + 1}"),
+                    "chart_type": "none",
+                    "operation": plan.get("operation"),
+                    "x": plan.get("x"),
+                    "y": plan.get("y"),
+                    "metric": plan.get("metric"),
+                    "group_by": plan.get("group_by"),
+                    "aggregation": plan.get("aggregation"),
+                    "reason": str(error),
+                    "data": [],
+                })
+
+        return results
 
     def _normalize_dataframe_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -112,7 +107,7 @@ class PandasTools:
     def _normalize_name(self, value) -> str:
         return str(value).strip().lower().replace("_", " ")
 
-    def _normalize_list(self, value) -> list:
+    def _as_list(self, value) -> list:
         if value is None:
             return []
 
@@ -124,21 +119,11 @@ class PandasTools:
 
         return [value] if str(value).strip() else []
 
-    def _sanitize_aggregations(self, aggregation: list[str]) -> list[str]:
-        valid = []
+    def _first_value(self, value):
+        values = self._as_list(value)
+        return str(values[0]).strip().lower() if values else "none"
 
-        for item in aggregation:
-            item = str(item).strip().lower()
-
-            if item == "avg":
-                item = "mean"
-
-            if item in self.AGGREGATION_LABELS:
-                valid.append(item)
-
-        return valid or ["count"]
-
-    def _find_column(self, df: pd.DataFrame, column: str | None) -> str | None:
+    def _find_column(self, df: pd.DataFrame, column) -> str | None:
         if not column:
             return None
 
@@ -150,14 +135,10 @@ class PandasTools:
 
         return None
 
-    def _resolve_columns(
-        self,
-        df: pd.DataFrame,
-        columns: list[str],
-    ) -> list[str]:
+    def _resolve_columns(self, df: pd.DataFrame, columns) -> list[str]:
         resolved = []
 
-        for column in columns:
+        for column in self._as_list(columns):
             real_column = self._find_column(df, column)
 
             if real_column and real_column not in resolved:
@@ -165,97 +146,53 @@ class PandasTools:
 
         return resolved
 
-    def _get_numeric_columns(self, df: pd.DataFrame) -> list[str]:
-        numeric_columns = df.select_dtypes(include="number").columns.tolist()
+    def _resolve_group_by(self, df: pd.DataFrame, plan: dict) -> list[str]:
+        group_by = self._resolve_columns(df, plan.get("group_by"))
 
-        if numeric_columns:
-            return numeric_columns
+        if group_by:
+            return group_by
 
-        resolved = []
+        x = self._find_column(df, plan.get("x"))
 
-        for column in df.columns:
-            converted = pd.to_numeric(df[column], errors="coerce")
+        if x:
+            return [x]
 
-            if converted.notna().sum() > 0:
-                resolved.append(column)
+        return []
 
-        return resolved
+    def _resolve_metric(self, df: pd.DataFrame, plan: dict) -> list[str]:
+        metric = self._resolve_columns(df, plan.get("metric"))
 
-    def _get_first_numeric_column(self, df: pd.DataFrame) -> str | None:
-        numeric_columns = self._get_numeric_columns(df)
+        if metric:
+            return metric
 
-        for preferred in self.PREFERRED_NUMERIC_COLUMNS:
-            for column in numeric_columns:
-                if preferred == self._normalize_name(column):
-                    return column
+        y = self._find_column(df, plan.get("y"))
 
-        for preferred in self.PREFERRED_NUMERIC_COLUMNS:
-            for column in numeric_columns:
-                if preferred in self._normalize_name(column):
-                    return column
+        if y:
+            return [y]
 
-        return numeric_columns[0] if numeric_columns else None
+        return []
 
-    def _get_first_categorical_column(self, df: pd.DataFrame) -> str | None:
-        if df.empty or len(df.columns) == 0:
-            return None
+    def _to_numeric(self, df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+        df = df.copy()
 
-        numeric_columns = set(self._get_numeric_columns(df))
+        for column in columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
 
-        categorical_columns = [
-            column for column in df.columns
-            if column not in numeric_columns
-        ]
-
-        if not categorical_columns:
-            return df.columns[0]
-
-        for preferred in self.PREFERRED_CATEGORICAL_COLUMNS:
-            for column in categorical_columns:
-                if preferred == self._normalize_name(column):
-                    return column
-
-        for preferred in self.PREFERRED_CATEGORICAL_COLUMNS:
-            for column in categorical_columns:
-                if preferred in self._normalize_name(column):
-                    return column
-
-        return categorical_columns[0]
-
-    def _resolve_group_by(
-        self,
-        df: pd.DataFrame,
-        group_by: list[str],
-    ) -> list[str]:
-        resolved = self._resolve_columns(df, group_by)
-
-        if resolved:
-            return resolved
-
-        fallback = self._get_first_categorical_column(df)
-
-        return [fallback] if fallback else []
-
-    def _resolve_metric(
-        self,
-        df: pd.DataFrame,
-        metric: list[str],
-    ) -> list[str]:
-        resolved = self._resolve_columns(df, metric)
-
-        if resolved:
-            return resolved
-
-        fallback = self._get_first_numeric_column(df)
-
-        return [fallback] if fallback else []
+        return df.dropna(subset=columns)
 
     def _clean_column_name(self, column: str) -> str:
         name = str(column).strip()
 
-        for aggregation, label in self.AGGREGATION_LABELS.items():
-            suffix = f"_{aggregation}"
+        suffixes = {
+            "_sum": "",
+            "_mean": " Médio",
+            "_count": " Quantidade",
+            "_max": " Máximo",
+            "_min": " Mínimo",
+            "_median": " Mediana",
+        }
 
+        for suffix, label in suffixes.items():
             if name.endswith(suffix):
                 name = name[: -len(suffix)].strip()
 
@@ -269,10 +206,7 @@ class PandasTools:
 
         return name
 
-    def _flatten_columns(
-        self,
-        result: pd.DataFrame,
-    ) -> pd.DataFrame:
+    def _flatten_columns(self, result: pd.DataFrame) -> pd.DataFrame:
         new_columns = []
 
         for column in result.columns:
@@ -287,15 +221,18 @@ class PandasTools:
                     metric = " ".join(parts[:-1]).strip()
                     aggregation = parts[-1].strip()
 
-                    label = self.AGGREGATION_LABELS.get(
-                        aggregation,
-                        "",
-                    )
+                    labels = {
+                        "sum": "",
+                        "mean": " Médio",
+                        "count": " Quantidade",
+                        "max": " Máximo",
+                        "min": " Mínimo",
+                        "median": " Mediana",
+                    }
 
-                    if label:
-                        new_name = f"{metric}{label}"
-                    else:
-                        new_name = metric
+                    label = labels.get(aggregation, "")
+                    new_name = f"{metric}{label}" if label else metric
+
                 elif parts:
                     new_name = parts[0]
                 else:
@@ -303,199 +240,186 @@ class PandasTools:
             else:
                 new_name = str(column)
 
-            new_columns.append(
-                self._clean_column_name(new_name)
-            )
+            new_columns.append(self._clean_column_name(new_name))
 
         result.columns = new_columns
 
         return result
 
-    def _count(
-        self,
-        df: pd.DataFrame,
-        group_by: list[str],
-    ) -> list[dict]:
-        group_by = self._resolve_group_by(
-            df=df,
-            group_by=group_by,
-        )
+    def _sort_and_limit(self, result: pd.DataFrame, y_column: str | None, plan: dict, default_limit: int = 20) -> pd.DataFrame:
+        limit = plan.get("limit", default_limit)
+
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = default_limit
+
+        limit = max(1, min(limit, 100))
+
+        sort = plan.get("sort", "desc")
+
+        if y_column and y_column in result.columns and sort in ["asc", "desc"]:
+            result = result.sort_values(
+                by=y_column,
+                ascending=sort == "asc",
+            )
+
+        return result.head(limit)
+
+    def _aggregate(self, df: pd.DataFrame, group_by: list[str], metric: list[str], aggregation: str) -> pd.DataFrame:
+        if aggregation == "mean":
+            result = df.groupby(group_by, dropna=False)[metric].mean().reset_index()
+        elif aggregation == "max":
+            result = df.groupby(group_by, dropna=False)[metric].max().reset_index()
+        elif aggregation == "min":
+            result = df.groupby(group_by, dropna=False)[metric].min().reset_index()
+        elif aggregation == "median":
+            result = df.groupby(group_by, dropna=False)[metric].median().reset_index()
+        else:
+            result = df.groupby(group_by, dropna=False)[metric].sum().reset_index()
+
+        return self._flatten_columns(result)
+
+    def _count(self, df: pd.DataFrame, plan: dict) -> list[dict]:
+        group_by = self._resolve_group_by(df, plan)
 
         if not group_by:
-            return []
+            raise ValueError("group_by não encontrado para contagem.")
 
         result = (
             df.groupby(group_by, dropna=False)
             .size()
             .reset_index(name="Quantidade")
-            .sort_values("Quantidade", ascending=False)
-            .head(20)
+        )
+
+        result = self._sort_and_limit(
+            result=result,
+            y_column="Quantidade",
+            plan=plan,
+            default_limit=20,
         )
 
         return result.to_dict(orient="records")
 
-    def _groupby(
-        self,
-        df: pd.DataFrame,
-        group_by: list[str],
-        metric: list[str],
-        aggregation: list[str],
-    ) -> list[dict]:
-        group_by = self._resolve_group_by(
-            df=df,
-            group_by=group_by,
-        )
+    def _groupby(self, df: pd.DataFrame, plan: dict, aggregation: str) -> list[dict]:
+        group_by = self._resolve_group_by(df, plan)
 
         if not group_by:
-            return []
+            raise ValueError("group_by não encontrado para groupby.")
 
-        metric = self._resolve_metric(
-            df=df,
-            metric=metric,
-        )
+        metric = self._resolve_metric(df, plan)
 
-        if not metric or aggregation == ["count"]:
-            result = (
-                df.groupby(group_by, dropna=False)
-                .size()
-                .reset_index(name="Quantidade")
-                .sort_values("Quantidade", ascending=False)
-                .head(20)
-            )
+        if not metric:
+            raise ValueError("metric não encontrada para groupby.")
 
-            return result.to_dict(orient="records")
+        if aggregation in ["none", "count"]:
+            aggregation = "sum"
 
-        temp_df = df.copy()
-
-        for column in metric:
-            temp_df[column] = pd.to_numeric(
-                temp_df[column],
-                errors="coerce",
-            )
-
-        temp_df = temp_df.dropna(subset=metric)
+        temp_df = self._to_numeric(df, metric)
 
         if temp_df.empty:
             return []
 
-        result = (
-            temp_df.groupby(group_by, dropna=False)[metric]
-            .agg(aggregation)
-            .reset_index()
+        result = self._aggregate(
+            df=temp_df,
+            group_by=group_by,
+            metric=metric,
+            aggregation=aggregation,
         )
 
-        result = self._flatten_columns(result)
-
         numeric_columns = [
-            col for col in result.columns
-            if col not in group_by
+            column for column in result.columns
+            if column not in group_by
         ]
 
-        if numeric_columns:
-            result = result.sort_values(
-                numeric_columns[0],
-                ascending=False,
-            )
+        sort_column = numeric_columns[0] if numeric_columns else None
 
-        result = result.head(20)
+        result = self._sort_and_limit(
+            result=result,
+            y_column=sort_column,
+            plan=plan,
+            default_limit=20,
+        )
 
         return result.to_dict(orient="records")
 
-    def _time_groupby(
-        self,
-        df: pd.DataFrame,
-        time_column: str,
-        metric: list[str],
-        aggregation: list[str],
-        time_freq: str,
-        group_by: list[str] | None = None,
-    ) -> list[dict]:
-        real_time_column = self._find_column(df, time_column)
+    def _time_groupby(self, df: pd.DataFrame, plan: dict, aggregation: str) -> list[dict]:
+        time_column = (
+            self._find_column(df, plan.get("time_column"))
+            or self._find_column(df, plan.get("x"))
+        )
 
-        if not real_time_column:
-            real_time_column = self._find_best_date_column(df)
+        if not time_column:
+            raise ValueError("time_column não encontrada para time_groupby.")
 
-        if not real_time_column:
-            return self._groupby(
-                df=df,
-                group_by=group_by or [],
-                metric=metric,
-                aggregation=aggregation,
-            )
+        time_freq = plan.get("time_freq", "M")
 
-        if time_freq not in ["D", "M", "Y"]:
+        if time_freq not in ["D", "W", "M", "Q", "Y"]:
             time_freq = "M"
 
         temp_df = df.copy()
 
-        temp_df[real_time_column] = pd.to_datetime(
-            temp_df[real_time_column],
+        temp_df[time_column] = pd.to_datetime(
+            temp_df[time_column],
             errors="coerce",
         )
 
-        temp_df = temp_df.dropna(
-            subset=[real_time_column]
-        )
+        temp_df = temp_df.dropna(subset=[time_column])
 
         if temp_df.empty:
-            return self._groupby(
-                df=df,
-                group_by=group_by or [],
-                metric=metric,
-                aggregation=aggregation,
-            )
+            return []
 
         temp_df["Período"] = (
-            temp_df[real_time_column]
+            temp_df[time_column]
             .dt.to_period(time_freq)
             .astype(str)
         )
 
         group_columns = ["Período"]
 
-        resolved_group_by = self._resolve_columns(
+        extra_group_by = self._resolve_columns(
             temp_df,
-            group_by or [],
+            plan.get("group_by"),
         )
 
-        group_columns.extend(resolved_group_by)
+        extra_group_by = [
+            column for column in extra_group_by
+            if column != time_column and column != "Período"
+        ]
 
-        metric = self._resolve_metric(
-            df=temp_df,
-            metric=metric,
-        )
+        group_columns.extend(extra_group_by)
 
-        if not metric or aggregation == ["count"]:
+        if aggregation == "count":
             result = (
                 temp_df.groupby(group_columns, dropna=False)
                 .size()
                 .reset_index(name="Quantidade")
-                .sort_values("Período")
-                .head(20)
             )
-        else:
-            for column in metric:
-                temp_df[column] = pd.to_numeric(
-                    temp_df[column],
-                    errors="coerce",
-                )
 
-            temp_df = temp_df.dropna(subset=metric)
+            result = result.sort_values("Período").head(100)
+
+        else:
+            metric = self._resolve_metric(temp_df, plan)
+
+            if not metric:
+                raise ValueError("metric não encontrada para time_groupby.")
+
+            if aggregation == "none":
+                aggregation = "sum"
+
+            temp_df = self._to_numeric(temp_df, metric)
 
             if temp_df.empty:
                 return []
 
-            result = (
-                temp_df.groupby(group_columns, dropna=False)[metric]
-                .agg(aggregation)
-                .reset_index()
+            result = self._aggregate(
+                df=temp_df,
+                group_by=group_columns,
+                metric=metric,
+                aggregation=aggregation,
             )
 
-            result = self._flatten_columns(result)
-
-            result = result.sort_values(
-                "Período"
-            ).head(20)
+            result = result.sort_values("Período").head(100)
 
         if len(group_columns) > 1:
             result["label"] = (
@@ -504,124 +428,75 @@ class PandasTools:
                 .agg(" | ".join, axis=1)
             )
         else:
-            result["label"] = (
-                result["Período"]
-                .astype(str)
-            )
+            result["label"] = result["Período"].astype(str)
 
         return result.to_dict(orient="records")
 
-    def _find_best_date_column(self, df: pd.DataFrame) -> str | None:
-        for column in df.columns:
-            normalized = self._normalize_name(column)
+    def _scatter(self, df: pd.DataFrame, plan: dict) -> list[dict]:
+        x = self._find_column(df, plan.get("x"))
+        y = self._find_column(df, plan.get("y"))
 
-            if any(term in normalized for term in ["data", "date", "dia", "mes", "mês", "ano"]):
-                return column
+        if not x or not y:
+            raise ValueError("x ou y não encontrado para scatter.")
 
-        return None
+        temp_df = self._to_numeric(df, [x, y])
 
-    @staticmethod
-    def rename_columns_df(
-        df: pd.DataFrame,
-        rename_map: dict[str, str] | None,
-    ) -> pd.DataFrame:
-        if df.empty:
-            return df
+        if temp_df.empty:
+            return []
 
-        if not rename_map:
-            return df
+        limit = plan.get("limit", 100)
 
-        normalized_columns = {
-            str(column).strip().lower(): column
-            for column in df.columns
-        }
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = 100
 
-        safe_rename_map = {}
+        limit = max(1, min(limit, 500))
 
-        for old_name, new_name in rename_map.items():
-            if not isinstance(new_name, str) or not new_name.strip():
-                continue
+        return temp_df[[x, y]].head(limit).to_dict(orient="records")
 
-            real_old_name = normalized_columns.get(
-                str(old_name).strip().lower()
-            )
+    def _kpi(self, df: pd.DataFrame, plan: dict, aggregation: str) -> list[dict]:
+        metric = self._resolve_metric(df, plan)
 
-            if real_old_name:
-                safe_rename_map[real_old_name] = new_name.strip()
+        if not metric:
+            raise ValueError("metric não encontrada para kpi.")
 
-        if not safe_rename_map:
-            return df
+        column = metric[0]
 
-        return df.rename(
-            columns=safe_rename_map
-        )
+        temp_df = self._to_numeric(df, [column])
 
-    def execute_many(
-        self,
-        df,
-        plans: list[dict],
-    ) -> list[dict]:
-        results = []
+        if temp_df.empty:
+            return []
 
-        for index, plan in enumerate(plans):
-            try:
-                metrics = self.execute(
-                    df=df,
-                    plan=plan,
-                )
+        if aggregation == "mean":
+            value = temp_df[column].mean()
+        elif aggregation == "max":
+            value = temp_df[column].max()
+        elif aggregation == "min":
+            value = temp_df[column].min()
+        elif aggregation == "median":
+            value = temp_df[column].median()
+        elif aggregation == "count":
+            value = temp_df[column].count()
+        else:
+            aggregation = "sum"
+            value = temp_df[column].sum()
 
-                if not metrics:
-                    results.append({
-                        "id": f"chart_{index + 1}",
-                        "title": plan.get(
-                            "title",
-                            f"Gráfico {index + 1}",
-                        ),
-                        "chart_type": "none",
-                        "operation": None,
-                        "x": None,
-                        "y": None,
-                        "reason": "Não foi possível gerar dados para este gráfico.",
-                        "data": [],
-                    })
+        return [
+            {
+                "label": plan.get("title", column),
+                column: value,
+            }
+        ]
 
-                    continue
+    def _table(self, df: pd.DataFrame, plan: dict) -> list[dict]:
+        limit = plan.get("limit", 50)
 
-                results.append({
-                    "id": f"chart_{index + 1}",
-                    "title": plan.get(
-                        "title",
-                        f"Gráfico {index + 1}",
-                    ),
-                    "chart_type": plan.get(
-                        "chart_type",
-                        "bar",
-                    ),
-                    "operation": plan.get(
-                        "operation"
-                    ),
-                    "x": plan.get("x"),
-                    "y": plan.get("y"),
-                    "reason": plan.get(
-                        "reason",
-                        "",
-                    ),
-                    "data": metrics,
-                })
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = 50
 
-            except Exception as error:
-                results.append({
-                    "id": f"chart_{index + 1}",
-                    "title": plan.get(
-                        "title",
-                        f"Gráfico {index + 1}",
-                    ),
-                    "chart_type": "none",
-                    "operation": None,
-                    "x": None,
-                    "y": None,
-                    "reason": str(error),
-                    "data": [],
-                })
+        limit = max(1, min(limit, 200))
 
-        return results
+        return df.head(limit).to_dict(orient="records")
