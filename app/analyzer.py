@@ -145,6 +145,8 @@ class Analyzer:
             "x": None,
             "y": None,
             "data": [],
+            "operation": interpretation.get("operation"),
+            "aggregation": interpretation.get("aggregation"),
             "reason": interpretation.get("reason", ""),
         }
 
@@ -186,16 +188,72 @@ class Analyzer:
 
         return None
 
+    def _get_first_categorical_column(self, df: pd.DataFrame) -> str | None:
+        if df.empty or len(df.columns) == 0:
+            return None
+
+        numeric_columns = set(df.select_dtypes(include="number").columns.tolist())
+
+        preferred_names = [
+            "campanha",
+            "produto",
+            "categoria",
+            "canal",
+            "região",
+            "regiao",
+            "cidade",
+            "cliente",
+            "vendedor",
+            "forma_pagamento",
+            "status",
+        ]
+
+        for preferred in preferred_names:
+            for column in df.columns:
+                if self._normalize_name(column) == preferred:
+                    return column
+
+        for column in df.columns:
+            if column not in numeric_columns:
+                return column
+
+        return df.columns[0]
+
+    def _resolve_x_column(self, df: pd.DataFrame, interpretation: dict) -> str | None:
+        x = self._resolve_column(df, interpretation.get("x"))
+
+        if not x:
+            x = self._resolve_column(df, interpretation.get("group_by", []))
+
+        if not x:
+            x = self._resolve_column(df, interpretation.get("dimension", []))
+
+        if not x:
+            x = self._get_first_categorical_column(df)
+
+        return x
+
+    def _resolve_y_column(self, df: pd.DataFrame, interpretation: dict) -> str | None:
+        y = self._resolve_column(df, interpretation.get("y"))
+
+        if not y:
+            y = self._resolve_column(df, interpretation.get("metric", []))
+
+        if not y:
+            y = self._resolve_column(df, interpretation.get("value", []))
+
+        if not y:
+            y = self._get_first_numeric_column(df)
+
+        return y
+
     def _count(
         self,
         df: pd.DataFrame,
         chart_type: str,
         interpretation: dict,
     ) -> dict:
-        x = self._resolve_column(df, interpretation.get("x"))
-
-        if not x:
-            x = self._resolve_column(df, interpretation.get("group_by", []))
+        x = self._resolve_x_column(df, interpretation)
 
         if not x:
             return self._empty_chart(interpretation)
@@ -227,20 +285,14 @@ class Analyzer:
         interpretation: dict,
         aggregation: str,
     ) -> dict:
-        x = self._resolve_column(df, interpretation.get("x"))
-        y = self._resolve_column(df, interpretation.get("y"))
-
-        if not x:
-            x = self._resolve_column(df, interpretation.get("group_by", []))
-
-        if not y:
-            y = self._resolve_column(df, interpretation.get("metric", []))
-
-        if not y:
-            y = self._get_first_numeric_column(df)
+        x = self._resolve_x_column(df, interpretation)
+        y = self._resolve_y_column(df, interpretation)
 
         if not x or not y:
             return self._empty_chart(interpretation)
+
+        if aggregation == "none":
+            aggregation = "sum"
 
         df = df.copy()
         df[y] = pd.to_numeric(df[y], errors="coerce")
@@ -257,6 +309,13 @@ class Analyzer:
             result = df.groupby(x, dropna=False)[y].max().reset_index()
         elif aggregation == "min":
             result = df.groupby(x, dropna=False)[y].min().reset_index()
+        elif aggregation == "count":
+            result = (
+                df.groupby(x, dropna=False)
+                .size()
+                .reset_index(name="count")
+            )
+            y = "count"
         else:
             result = df[[x, y]].copy()
 
@@ -281,7 +340,15 @@ class Analyzer:
         interpretation: dict,
     ) -> dict:
         time_column = self._resolve_column(df, interpretation.get("time_column"))
-        y = self._resolve_column(df, interpretation.get("y"))
+
+        if not time_column:
+            time_column = self._resolve_column(df, interpretation.get("date_column"))
+
+        if not time_column:
+            time_column = self._resolve_column(df, interpretation.get("x"))
+
+        y = self._resolve_y_column(df, interpretation)
+
         time_freq = interpretation.get("time_freq", "M")
         aggregation = self._get_first_value(
             interpretation.get("aggregation", "sum")
@@ -289,9 +356,6 @@ class Analyzer:
 
         if not time_column:
             return self._empty_chart(interpretation)
-
-        if not y:
-            y = self._resolve_column(df, interpretation.get("metric", []))
 
         if aggregation == "count":
             y = "count"
