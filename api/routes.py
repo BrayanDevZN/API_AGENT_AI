@@ -1,13 +1,11 @@
 from fastapi import (
     APIRouter,
-    UploadFile,
-    File,
     Form,
     HTTPException
 )
 
 from app.manager import Manager
-from app.file_reader import FileReader
+from app.accounts_client import AccountsClient
 
 from api.model import ChatRequest, ChatResponse, DashboardAnalyzeResponse
 
@@ -15,7 +13,7 @@ from api.model import ChatRequest, ChatResponse, DashboardAnalyzeResponse
 router = APIRouter()
 
 manager = Manager()
-reader = FileReader()
+accounts_client = AccountsClient()
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -35,16 +33,30 @@ async def dashboard_analyze(
     token: str = Form(...),
     title: str = Form(...),
     prompt: str = Form(...),
-    file: UploadFile = File(...)
+    data_source_id: int = Form(...)
 ):
     try:
-        dataset = await reader.read(file)
+        source_response = accounts_client.get_data_source(
+            token=token,
+            data_source_id=data_source_id
+        )
+
+        data_source = source_response.get("data_source")
+
+        if not data_source:
+            raise ValueError("Fonte de dados não encontrada.")
+
+        dataset = data_source.get("file_data")
+
+        if not dataset:
+            raise ValueError("A fonte de dados não possui dados válidos.")
 
         data = {
             "token": token,
             "title": title,
             "prompt": prompt,
-            "file_name": file.filename,
+            "data_source_id": data_source_id,
+            "file_name": data_source.get("file_name"),
             "dataset": dataset
         }
 

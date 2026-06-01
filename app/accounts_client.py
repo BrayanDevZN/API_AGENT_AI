@@ -107,3 +107,23 @@ class AccountsClient:
             return None
 
         return res.json().get("chart")
+    
+    
+    def get_data_source(
+        self,
+        token: str,
+        data_source_id: int
+    ) -> dict:
+        response = requests.post(
+            f"{self.base_url}/data-source",
+            json={
+                "token": token,
+                "data_source_id": data_source_id
+            },
+            timeout=30
+        )
+
+        if not response.ok:
+            raise Exception(response.text)
+
+        return response.json()
