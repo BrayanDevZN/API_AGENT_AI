@@ -54,32 +54,35 @@ class AccountsClient:
             return data
 
         return data.get("messages", [])
-    
+
     def create_dashboard(
         self,
         token: str,
         title: str,
         prompt: str,
         ai_suggestion: str | None,
-        file_name: str | None
+        file_name: str | None,
+        data_source_id: int | None = None
     ) -> dict | None:
+        payload = {
+            "token": token,
+            "title": title,
+            "prompt": prompt,
+            "ai_suggestion": ai_suggestion,
+            "file_name": file_name,
+            "data_source_id": data_source_id,
+        }
+
         res = requests.post(
             f"{self.base_url}/dashboard/create",
-            json={
-                "token": token,
-                "title": title,
-                "prompt": prompt,
-                "ai_suggestion": ai_suggestion,
-                "file_name": file_name
-            },
+            json=payload,
             timeout=settings.TIMEOUT
         )
 
         if res.status_code not in (200, 201):
-            return None
+            raise Exception(res.text)
 
         return res.json().get("dashboard")
-
 
     def create_dashboard_chart(
         self,
@@ -98,17 +101,16 @@ class AccountsClient:
                 "chart_data": {
                     "data": chart_data
                 },
-                "chart_config": chart_config
+                "chart_config": chart_config or {}
             },
             timeout=settings.TIMEOUT
         )
 
         if res.status_code not in (200, 201):
-            return None
+            raise Exception(res.text)
 
         return res.json().get("chart")
-    
-    
+
     def get_data_source(
         self,
         token: str,
@@ -120,7 +122,7 @@ class AccountsClient:
                 "token": token,
                 "data_source_id": data_source_id
             },
-            timeout=30
+            timeout=settings.TIMEOUT
         )
 
         if not response.ok:
