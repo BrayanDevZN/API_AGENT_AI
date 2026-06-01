@@ -1,3 +1,8 @@
+import json
+from datetime import date, datetime
+
+import pandas as pd
+
 from app.accounts_client import AccountsClient
 from app.interpreter import Interpreter
 from app.analyzer import Analyzer
@@ -16,6 +21,54 @@ class Service:
         self.cleaner = DataCleaner()
         self.profiler = DataProfiler()
         self.pandas_tools = PandasTools()
+
+    def _make_json_safe(self, value):
+        if isinstance(value, dict):
+            return {
+                str(key): self._make_json_safe(item)
+                for key, item in value.items()
+            }
+
+        if isinstance(value, list):
+            return [
+                self._make_json_safe(item)
+                for item in value
+            ]
+
+        if isinstance(value, tuple):
+            return [
+                self._make_json_safe(item)
+                for item in value
+            ]
+
+        if isinstance(value, pd.Timestamp):
+            return value.isoformat()
+
+        if isinstance(value, pd.Period):
+            return str(value)
+
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+
+        if pd.isna(value) if not isinstance(value, (list, dict, tuple, str)) else False:
+            return None
+
+        if hasattr(value, "item"):
+            try:
+                return value.item()
+            except Exception:
+                return value
+
+        return value
+
+    def _ensure_json_safe(self, data: dict) -> dict:
+        return json.loads(
+            json.dumps(
+                self._make_json_safe(data),
+                ensure_ascii=False,
+                default=str,
+            )
+        )
 
     def analyze(self, data: dict):
         token = data.get("token")
@@ -58,6 +111,9 @@ class Service:
                     interpretation=interpretation,
                 )
 
+            chart = self._make_json_safe(chart)
+            interpretation = self._make_json_safe(interpretation)
+
             answer = self.generator.run(
                 question=question,
                 chart=chart,
@@ -65,12 +121,12 @@ class Service:
                 interpretation=interpretation,
             )
 
-            return {
+            return self._ensure_json_safe({
                 "answer": answer,
                 "chart": chart,
                 "charts": [chart] if chart and chart.get("type") != "none" else [],
                 "interpretation": interpretation,
-            }
+            })
 
         answer = self.generator.run(
             question=question,
@@ -116,31 +172,37 @@ class Service:
         prompt = data["prompt"]
         dataset = data["dataset"]
         file_name = data.get("file_name")
+        data_source_id = data.get("data_source_id")
 
         if not self.accounts.valid_token(token):
             raise ValueError("Token inválido.")
 
         df = self.cleaner.clean(dataset)
         schema = self.profiler.profile(df)
+        schema = self._make_json_safe(schema)
 
         plan = self.interpreter.dashboard_plan(
             prompt=prompt,
             schema=schema,
         )
 
-        rename_columns = plan.get("rename_columns", {})
+        plan = self._make_json_safe(plan)
 
+        rename_columns = plan.get("rename_columns", {})
         chart_plans = plan.get("charts") or [plan]
 
         for chart_plan in chart_plans:
             chart_plan["rename_columns"] = rename_columns
 
         all_charts_data = []
+
         for index, chart_plan in enumerate(chart_plans):
             metrics = self.pandas_tools.execute(
                 df=df,
                 plan=chart_plan,
             )
+
+            metrics = self._make_json_safe(metrics)
 
             operation = chart_plan.get("operation")
 
@@ -165,9 +227,11 @@ class Service:
                 "y": chart_y,
                 "aggregation": chart_plan.get("aggregation"),
                 "reason": chart_plan.get("reason", ""),
-                "plan": chart_plan,
+                "plan": self._make_json_safe(chart_plan),
                 "data": metrics,
             })
+
+        all_charts_data = self._make_json_safe(all_charts_data)
 
         ai_suggestion = self.generator.dashboard_analysis_multi(
             prompt=prompt,
@@ -182,6 +246,7 @@ class Service:
             prompt=prompt,
             ai_suggestion=ai_suggestion,
             file_name=file_name,
+            data_source_id=data_source_id,
         )
 
         if not dashboard:
@@ -210,9 +275,9 @@ class Service:
         if not created_charts:
             raise ValueError("Erro ao salvar gráficos.")
 
-        return {
+        return self._ensure_json_safe({
             "dashboard": dashboard,
             "charts": created_charts,
             "ai_suggestion": ai_suggestion,
             "plan": plan,
-        }
+        })
