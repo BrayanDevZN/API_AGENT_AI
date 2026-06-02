@@ -279,7 +279,7 @@ class Service:
             token=token,
             title=title,
             prompt=prompt or "",
-            ai_suggestion=ai_suggestion,
+            ai_suggestion=analysis["ai_suggestion"],
             file_name=file_name,
             data_source_id=data_source_id,
         )
