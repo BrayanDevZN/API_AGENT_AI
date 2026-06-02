@@ -49,3 +49,9 @@ class DashboardAnalyzeResponse(BaseModel):
     charts: list[dict[str, Any]]
     ai_suggestion: str
     plan: Optional[dict[str, Any]] = None
+
+
+class DashboardRefreshAnalyzeResponse(BaseModel):
+    charts: list[dict[str, Any]]
+    ai_suggestion: str
+    plan: Optional[dict[str, Any]] = None

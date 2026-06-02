@@ -13,3 +13,6 @@ class Manager:
 
     def generate_dashboard(self, data: dict) -> dict:
         return self.service.generate_dashboard(data)
+
+    def analyze_dashboard_refresh(self, data: dict) -> dict:
+        return self.service.analyze_dashboard_refresh(data)

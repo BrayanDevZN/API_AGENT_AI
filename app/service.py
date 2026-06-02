@@ -182,14 +182,11 @@ class Service:
             "answer": answer,
         }
 
-    def generate_dashboard(self, data: dict) -> dict:
+    def _build_dashboard_analysis(self, data: dict) -> dict:
         token = data["token"]
-        title = data["title"]
         prompt = self._normalize_prompt(data.get("prompt"))
 
         dataset = data["dataset"]
-        file_name = data.get("file_name")
-        data_source_id = data.get("data_source_id")
 
         if not self.accounts.valid_token(token):
             raise ValueError("Token inválido.")
@@ -260,6 +257,24 @@ class Service:
             plan=plan,
         )
 
+        return self._ensure_json_safe({
+            "charts": all_charts_data,
+            "ai_suggestion": ai_suggestion,
+            "plan": plan,
+        })
+
+    def analyze_dashboard_refresh(self, data: dict) -> dict:
+        return self._build_dashboard_analysis(data)
+
+    def generate_dashboard(self, data: dict) -> dict:
+        token = data["token"]
+        title = data["title"]
+        prompt = self._normalize_prompt(data.get("prompt"))
+        file_name = data.get("file_name")
+        data_source_id = data.get("data_source_id")
+
+        analysis = self._build_dashboard_analysis(data)
+
         dashboard = self.accounts.create_dashboard(
             token=token,
             title=title,
@@ -274,7 +289,7 @@ class Service:
 
         created_charts = []
 
-        for chart_data in all_charts_data:
+        for chart_data in analysis["charts"]:
             chart = self.accounts.create_dashboard_chart(
                 dashboard_id=dashboard["id"],
                 chart_type=chart_data["chart_type"],
@@ -298,6 +313,6 @@ class Service:
         return self._ensure_json_safe({
             "dashboard": dashboard,
             "charts": created_charts,
-            "ai_suggestion": ai_suggestion,
-            "plan": plan,
+            "ai_suggestion": analysis["ai_suggestion"],
+            "plan": analysis["plan"],
         })
