@@ -237,6 +237,12 @@ REGRAS:
 - Para financeiro, priorize receita, despesa, lucro, custo, margem, saldo e valor se existirem.
 - Para RH, priorize salário, funcionários, idade, cargo, departamento e turnover se existirem.
 - Para atendimento, priorize chamados, tickets, tempo, satisfação, status e resolução se existirem.
+- Nunca use a mesma coluna para x e y.
+- Nunca use a mesma coluna em group_by e metric.
+- Para groupby, group_by deve ser coluna categórica e metric deve ser coluna numérica.
+- Se uma coluna numérica aparecer como group_by e também como metric, corrija usando uma coluna categórica para group_by.
+- Exemplo errado: group_by ["Nota_Entrevista"] e metric ["Nota_Entrevista"].
+- Exemplo certo: group_by ["Departamento"] e metric ["Nota_Entrevista"] com aggregation ["mean"].
 - rename_columns é só visual. Os gráficos usam nomes originais.
 """
 
@@ -665,6 +671,121 @@ Histórico:
         return contexts.get(dataset_type, contexts["generico"])
 
 
+    def _preferred_group_column_for_metric(
+        self,
+        metric: str | None,
+        categorical_columns: list[str],
+    ) -> str | None:
+        preferred_names = [
+            "departamento",
+            "status",
+            "vaga",
+            "recrutador",
+            "etapa_atual",
+            "etapa atual",
+            "regiao",
+            "região",
+            "cidade",
+            "categoria",
+            "produto",
+            "canal",
+            "campanha",
+            "cliente",
+            "tipo",
+            "cargo",
+        ]
+
+        candidates = [
+            column for column in categorical_columns
+            if column != metric
+        ]
+
+        return self._preferred_column(candidates, preferred_names)
+
+    def _preferred_metric_column_for_group(
+        self,
+        group_by: str | None,
+        numeric_columns: list[str],
+    ) -> str | None:
+        preferred_names = [
+            "receita",
+            "valor",
+            "total",
+            "nota",
+            "nota_entrevista",
+            "nota entrevista",
+            "salario",
+            "salário",
+            "quantidade",
+            "lucro",
+            "vendas",
+            "pedidos",
+            "cliques",
+            "conversões",
+            "conversoes",
+            "investimento",
+            "custo",
+        ]
+
+        candidates = [
+            column for column in numeric_columns
+            if column != group_by
+        ]
+
+        return self._preferred_column(candidates, preferred_names)
+
+    def _fix_same_group_metric(
+        self,
+        group_by: str | None,
+        metric: str | None,
+        x: str | None,
+        y: str | None,
+        numeric_columns: list[str],
+        categorical_columns: list[str],
+    ) -> tuple[str | None, str | None, str | None, str | None]:
+        if group_by and metric and group_by == metric:
+            if group_by in numeric_columns:
+                better_group = self._preferred_group_column_for_metric(
+                    metric=metric,
+                    categorical_columns=categorical_columns,
+                )
+
+                if better_group:
+                    group_by = better_group
+                    x = better_group
+            else:
+                better_metric = self._preferred_metric_column_for_group(
+                    group_by=group_by,
+                    numeric_columns=numeric_columns,
+                )
+
+                if better_metric:
+                    metric = better_metric
+                    y = better_metric
+
+        if x and y and x == y:
+            if x in numeric_columns:
+                better_x = self._preferred_group_column_for_metric(
+                    metric=y,
+                    categorical_columns=categorical_columns,
+                )
+
+                if better_x:
+                    x = better_x
+                    group_by = better_x
+            else:
+                better_y = self._preferred_metric_column_for_group(
+                    group_by=x,
+                    numeric_columns=numeric_columns,
+                )
+
+                if better_y:
+                    y = better_y
+                    metric = better_y
+
+        return group_by, metric, x, y
+
+
     def _clean_rename_columns(self, rename_columns: dict, columns: list[str]) -> dict:
         if not isinstance(rename_columns, dict):
             return {}
@@ -772,6 +893,15 @@ Histórico:
         x = self._find_column(chart.get("x"), columns)
         y = self._find_column(chart.get("y"), columns)
         time_column = self._find_column(chart.get("time_column"), columns)
+
+        group_by, metric, x, y = self._fix_same_group_metric(
+            group_by=group_by,
+            metric=metric,
+            x=x,
+            y=y,
+            numeric_columns=numeric_columns,
+            categorical_columns=categorical_columns,
+        )
 
         title_metric = self._metric_from_title(title, numeric_columns)
         title_category = self._category_from_title(title, categorical_columns)
@@ -962,6 +1092,38 @@ Histórico:
 
         if sort not in ["desc", "asc", "none"]:
             sort = "desc"
+
+        if operation == "groupby":
+            final_group = group_by_list[0] if group_by_list else None
+            final_metric = metric_list[0] if metric_list else None
+
+            if final_group and final_metric and final_group == final_metric:
+                fixed_group, fixed_metric, fixed_x, fixed_y = self._fix_same_group_metric(
+                    group_by=final_group,
+                    metric=final_metric,
+                    x=x,
+                    y=y,
+                    numeric_columns=numeric_columns,
+                    categorical_columns=categorical_columns,
+                )
+
+                if fixed_group and fixed_metric and fixed_group != fixed_metric:
+                    group_by_list = [fixed_group]
+                    metric_list = [fixed_metric]
+                    x = fixed_x or fixed_group
+                    y = fixed_y or fixed_metric
+                    title = self._coherent_title(
+                        title,
+                        operation,
+                        fixed_metric,
+                        fixed_group,
+                        aggregation[0],
+                    )
+                else:
+                    return None
+
+        if x and y and x == y and operation not in ["scatter", "kpi"]:
+            return None
 
         normalized_chart = {
             "title": title,
