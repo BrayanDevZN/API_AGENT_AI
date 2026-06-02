@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Any
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
@@ -20,9 +20,9 @@ class AnalyzeJsonRequest(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     answer: str
-    chart: Optional[dict] = None
-    charts: list[dict] = Field(default_factory=list)
-    interpretation: Optional[dict] = None
+    chart: Optional[dict[str, Any]] = None
+    charts: list[dict[str, Any]] = Field(default_factory=list)
+    interpretation: Optional[dict[str, Any]] = None
 
 
 class ChatRequest(BaseModel):
@@ -45,7 +45,7 @@ class ChatResponse(BaseModel):
 
 
 class DashboardAnalyzeResponse(BaseModel):
-    dashboard: dict
-    charts: list[dict]
+    dashboard: dict[str, Any]
+    charts: list[dict[str, Any]]
     ai_suggestion: str
-    plan: dict | None = None
+    plan: Optional[dict[str, Any]] = None

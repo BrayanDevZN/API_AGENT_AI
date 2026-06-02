@@ -22,6 +22,17 @@ class Service:
         self.profiler = DataProfiler()
         self.pandas_tools = PandasTools()
 
+    def _normalize_prompt(self, prompt: str | None) -> str | None:
+        if not prompt:
+            return None
+
+        prompt = str(prompt).strip()
+
+        if not prompt:
+            return None
+
+        return prompt
+
     def _make_json_safe(self, value):
         if isinstance(value, dict):
             return {
@@ -30,16 +41,10 @@ class Service:
             }
 
         if isinstance(value, list):
-            return [
-                self._make_json_safe(item)
-                for item in value
-            ]
+            return [self._make_json_safe(item) for item in value]
 
         if isinstance(value, tuple):
-            return [
-                self._make_json_safe(item)
-                for item in value
-            ]
+            return [self._make_json_safe(item) for item in value]
 
         if isinstance(value, pd.Timestamp):
             return value.isoformat()
@@ -50,8 +55,12 @@ class Service:
         if isinstance(value, (datetime, date)):
             return value.isoformat()
 
-        if pd.isna(value) if not isinstance(value, (list, dict, tuple, str)) else False:
-            return None
+        if not isinstance(value, (list, dict, tuple, str)):
+            try:
+                if pd.isna(value):
+                    return None
+            except Exception:
+                pass
 
         if hasattr(value, "item"):
             try:
@@ -69,6 +78,15 @@ class Service:
                 default=str,
             )
         )
+
+    def _get_chart_axis(self, chart_plan: dict, operation: str) -> tuple[str | None, str | None]:
+        if operation == "time_groupby":
+            return "label", "value"
+
+        if operation == "count":
+            return chart_plan.get("x"), "Quantidade"
+
+        return chart_plan.get("x"), chart_plan.get("y")
 
     def analyze(self, data: dict):
         token = data.get("token")
@@ -147,9 +165,7 @@ class Service:
         conversation_id = data["conversation_id"]
         question = data["question"]
 
-        valid = self.accounts.valid_token(token)
-
-        if not valid:
+        if not self.accounts.valid_token(token):
             raise Exception("Token inválido.")
 
         messages = self.accounts.get_messages(
@@ -169,7 +185,8 @@ class Service:
     def generate_dashboard(self, data: dict) -> dict:
         token = data["token"]
         title = data["title"]
-        prompt = data["prompt"]
+        prompt = self._normalize_prompt(data.get("prompt"))
+
         dataset = data["dataset"]
         file_name = data.get("file_name")
         data_source_id = data.get("data_source_id")
@@ -177,7 +194,14 @@ class Service:
         if not self.accounts.valid_token(token):
             raise ValueError("Token inválido.")
 
+        if not dataset:
+            raise ValueError("Dataset vazio ou inválido.")
+
         df = self.cleaner.clean(dataset)
+
+        if df.empty:
+            raise ValueError("Dataset sem dados após limpeza.")
+
         schema = self.profiler.profile(df)
         schema = self._make_json_safe(schema)
 
@@ -191,12 +215,17 @@ class Service:
         rename_columns = plan.get("rename_columns", {})
         chart_plans = plan.get("charts") or [plan]
 
+        if not chart_plans:
+            raise ValueError("Nenhum plano de gráfico foi gerado.")
+
         for chart_plan in chart_plans:
             chart_plan["rename_columns"] = rename_columns
 
         all_charts_data = []
 
         for index, chart_plan in enumerate(chart_plans):
+            operation = chart_plan.get("operation")
+
             metrics = self.pandas_tools.execute(
                 df=df,
                 plan=chart_plan,
@@ -204,18 +233,9 @@ class Service:
 
             metrics = self._make_json_safe(metrics)
 
-            operation = chart_plan.get("operation")
-
-            chart_x = (
-                "label"
-                if operation == "time_groupby"
-                else chart_plan.get("x")
-            )
-
-            chart_y = (
-                "value"
-                if operation == "time_groupby"
-                else chart_plan.get("y")
+            chart_x, chart_y = self._get_chart_axis(
+                chart_plan=chart_plan,
+                operation=operation,
             )
 
             all_charts_data.append({
@@ -243,7 +263,7 @@ class Service:
         dashboard = self.accounts.create_dashboard(
             token=token,
             title=title,
-            prompt=prompt,
+            prompt=prompt or "",
             ai_suggestion=ai_suggestion,
             file_name=file_name,
             data_source_id=data_source_id,

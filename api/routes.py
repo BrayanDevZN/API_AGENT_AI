@@ -27,15 +27,16 @@ def chat(data: ChatRequest):
             detail=str(error)
         )
 
-
 @router.post("/dashboard/analyze", response_model=DashboardAnalyzeResponse)
 async def dashboard_analyze(
     token: str = Form(...),
     title: str = Form(...),
-    prompt: str = Form(...),
+    prompt: str | None = Form(None),
     data_source_id: int = Form(...)
 ):
     try:
+        clean_prompt = prompt.strip() if prompt and prompt.strip() else None
+
         source_response = accounts_client.get_data_source(
             token=token,
             data_source_id=data_source_id
@@ -54,7 +55,7 @@ async def dashboard_analyze(
         data = {
             "token": token,
             "title": title,
-            "prompt": prompt,
+            "prompt": clean_prompt,
             "data_source_id": data_source_id,
             "file_name": data_source.get("file_name"),
             "dataset": dataset

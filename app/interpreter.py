@@ -53,6 +53,102 @@ class Interpreter:
         "clientes": ["cliente", "clientes", "customers"],
     }
 
+    DOMAIN_PRIORITY_METRICS = {
+        "marketing": [
+            "receita",
+            "conversões",
+            "conversoes",
+            "cliques",
+            "impressões",
+            "impressoes",
+            "investimento",
+            "custo",
+            "roi",
+            "ctr",
+            "cpc",
+            "cpa",
+        ],
+        "vendas": [
+            "receita",
+            "vendas",
+            "lucro",
+            "ticket",
+            "quantidade",
+            "pedidos",
+            "clientes",
+            "valor",
+        ],
+        "financeiro": [
+            "receita",
+            "lucro",
+            "despesa",
+            "custo",
+            "margem",
+            "saldo",
+            "valor",
+            "total",
+        ],
+        "ecommerce": [
+            "receita",
+            "vendas",
+            "pedidos",
+            "ticket",
+            "produto",
+            "quantidade",
+            "clientes",
+            "frete",
+        ],
+        "rh": [
+            "salário",
+            "salario",
+            "funcionários",
+            "funcionarios",
+            "departamento",
+            "cargo",
+            "idade",
+            "turnover",
+        ],
+        "atendimento": [
+            "chamados",
+            "tickets",
+            "tempo",
+            "satisfação",
+            "satisfacao",
+            "status",
+            "resolução",
+            "resolucao",
+        ],
+        "produto": [
+            "produto",
+            "uso",
+            "usuários",
+            "usuarios",
+            "retenção",
+            "retencao",
+            "churn",
+            "feature",
+        ],
+        "operacional": [
+            "quantidade",
+            "tempo",
+            "custo",
+            "status",
+            "produção",
+            "producao",
+            "entrega",
+            "estoque",
+        ],
+        "generico": [
+            "receita",
+            "valor",
+            "total",
+            "quantidade",
+            "vendas",
+            "clientes",
+            "pedidos",
+        ],
+    }
+
     def __init__(self):
         self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
         self.model = Settings.OPENAI_MODEL
@@ -86,6 +182,9 @@ FORMATO:
 {
   "tool": "dashboard_plan",
   "dataset_type": "marketing | vendas | financeiro | ecommerce | rh | atendimento | produto | operacional | generico",
+  "analysis_type": "general | specific",
+  "business_context": "contexto curto do dataset",
+  "priority_metrics": ["métricas mais importantes encontradas no schema"],
   "rename_columns": {
     "coluna_original": "Nome amigável"
   },
@@ -129,6 +228,15 @@ REGRAS:
 - Evolução temporal deve usar line ou area.
 - Retorne entre 3 e 10 gráficos úteis.
 - Se o dataset for simples, retorne menos.
+- analysis_type deve ser "general" quando o pedido for amplo ou vazio.
+- analysis_type deve ser "specific" quando o usuário pedir algo específico.
+- business_context deve explicar em poucas palavras o provável contexto dos dados.
+- priority_metrics deve conter apenas colunas reais do schema que sejam métricas importantes para o tipo de dataset.
+- Para marketing, priorize métricas como receita, conversões, cliques, impressões, investimento, ROI, CTR, CPC e CPA se existirem.
+- Para vendas/ecommerce, priorize receita, vendas, lucro, ticket, pedidos, quantidade, clientes e produtos se existirem.
+- Para financeiro, priorize receita, despesa, lucro, custo, margem, saldo e valor se existirem.
+- Para RH, priorize salário, funcionários, idade, cargo, departamento e turnover se existirem.
+- Para atendimento, priorize chamados, tickets, tempo, satisfação, status e resolução se existirem.
 - rename_columns é só visual. Os gráficos usam nomes originais.
 """
 
@@ -380,6 +488,182 @@ Histórico:
                 return column
 
         return None
+
+    def _guess_dataset_type(self, schema: dict, columns: list[str]) -> str:
+        schema_text = self._normalize_name(
+            " ".join(columns) + " " + json.dumps(schema, ensure_ascii=False)
+        )
+
+        domain_scores = {
+            "marketing": [
+                "campanha",
+                "canal",
+                "clique",
+                "click",
+                "impress",
+                "convers",
+                "ctr",
+                "cpc",
+                "cpa",
+                "roi",
+                "leads",
+                "ads",
+                "anuncio",
+                "anúncio",
+                "investimento",
+            ],
+            "vendas": [
+                "venda",
+                "receita",
+                "cliente",
+                "pedido",
+                "produto",
+                "ticket",
+                "faturamento",
+                "lucro",
+                "valor",
+                "vendedor",
+            ],
+            "financeiro": [
+                "despesa",
+                "receita",
+                "lucro",
+                "custo",
+                "margem",
+                "saldo",
+                "conta",
+                "pagamento",
+                "financeiro",
+            ],
+            "ecommerce": [
+                "produto",
+                "pedido",
+                "frete",
+                "carrinho",
+                "categoria",
+                "sku",
+                "checkout",
+                "cliente",
+                "compra",
+            ],
+            "rh": [
+                "funcionario",
+                "funcionarios",
+                "colaborador",
+                "cargo",
+                "departamento",
+                "salario",
+                "turnover",
+                "idade",
+                "admissao",
+            ],
+            "atendimento": [
+                "chamado",
+                "ticket",
+                "atendimento",
+                "suporte",
+                "satisfacao",
+                "satisfação",
+                "sla",
+                "resolucao",
+                "resolução",
+            ],
+            "produto": [
+                "feature",
+                "uso",
+                "usuario",
+                "usuarios",
+                "retencao",
+                "retenção",
+                "churn",
+                "sessao",
+                "evento",
+            ],
+            "operacional": [
+                "estoque",
+                "entrega",
+                "producao",
+                "produção",
+                "operacao",
+                "operação",
+                "tempo",
+                "status",
+                "logistica",
+                "logística",
+            ],
+        }
+
+        best_domain = "generico"
+        best_score = 0
+
+        for domain, terms in domain_scores.items():
+            score = sum(1 for term in terms if self._normalize_name(term) in schema_text)
+
+            if score > best_score:
+                best_score = score
+                best_domain = domain
+
+        return best_domain
+
+    def _priority_metrics_for_domain(
+        self,
+        dataset_type: str,
+        columns: list[str],
+        numeric_columns: list[str],
+    ) -> list[str]:
+        priorities = self.DOMAIN_PRIORITY_METRICS.get(
+            dataset_type,
+            self.DOMAIN_PRIORITY_METRICS["generico"],
+        )
+
+        result = []
+
+        for priority in priorities:
+            normalized_priority = self._normalize_name(priority)
+
+            for column in numeric_columns:
+                normalized_column = self._normalize_name(column)
+
+                if (
+                    normalized_priority == normalized_column
+                    or normalized_priority in normalized_column
+                    or normalized_column in normalized_priority
+                ):
+                    if column not in result:
+                        result.append(column)
+
+        if not result:
+            result = numeric_columns[:5]
+
+        return result[:8]
+
+    def _normalize_analysis_type(self, value, user_prompt: str | None) -> str:
+        if value in ["general", "specific"]:
+            return value
+
+        if user_prompt and str(user_prompt).strip():
+            return "specific"
+
+        return "general"
+
+    def _normalize_business_context(self, value, dataset_type: str) -> str:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+        contexts = {
+            "marketing": "Dados relacionados a campanhas, canais, investimento e desempenho de marketing.",
+            "vendas": "Dados relacionados a vendas, clientes, produtos, pedidos e receita.",
+            "financeiro": "Dados relacionados a valores financeiros, custos, receitas, despesas e resultados.",
+            "ecommerce": "Dados relacionados a vendas online, produtos, pedidos, clientes e categorias.",
+            "rh": "Dados relacionados a pessoas, cargos, departamentos, salários ou colaboradores.",
+            "atendimento": "Dados relacionados a chamados, tickets, suporte, status e atendimento.",
+            "produto": "Dados relacionados a uso de produto, usuários, funcionalidades e comportamento.",
+            "operacional": "Dados relacionados a processos, estoque, entregas, produção ou operação.",
+            "generico": "Dataset genérico com métricas e categorias para análise exploratória.",
+        }
+
+        return contexts.get(dataset_type, contexts["generico"])
+
 
     def _clean_rename_columns(self, rename_columns: dict, columns: list[str]) -> dict:
         if not isinstance(rename_columns, dict):
@@ -956,9 +1240,50 @@ Histórico:
 
         first_chart = charts[0]
 
+        inferred_dataset_type = self._guess_dataset_type(schema, columns)
+        dataset_type = data.get("dataset_type") or inferred_dataset_type
+
+        if dataset_type not in self.DOMAIN_PRIORITY_METRICS:
+            dataset_type = inferred_dataset_type
+
+        priority_metrics = [
+            metric for metric in self._as_list(data.get("priority_metrics"))
+            if self._find_column(metric, numeric_columns)
+        ]
+
+        priority_metrics = [
+            self._find_column(metric, numeric_columns)
+            for metric in priority_metrics
+        ]
+
+        priority_metrics = [
+            metric for metric in priority_metrics
+            if metric
+        ]
+
+        if not priority_metrics:
+            priority_metrics = self._priority_metrics_for_domain(
+                dataset_type=dataset_type,
+                columns=columns,
+                numeric_columns=numeric_columns,
+            )
+
+        analysis_type = self._normalize_analysis_type(
+            data.get("analysis_type"),
+            schema.get("user_prompt") or schema.get("prompt"),
+        )
+
+        business_context = self._normalize_business_context(
+            data.get("business_context"),
+            dataset_type,
+        )
+
         return {
             "tool": "dashboard_plan",
-            "dataset_type": data.get("dataset_type", "generico"),
+            "dataset_type": dataset_type,
+            "analysis_type": analysis_type,
+            "business_context": business_context,
+            "priority_metrics": priority_metrics,
             "rename_columns": self._clean_rename_columns(data.get("rename_columns", {}), columns),
             "charts": charts,
 
