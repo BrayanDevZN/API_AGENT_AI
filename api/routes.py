@@ -1,13 +1,19 @@
+import traceback
+
 from fastapi import (
     APIRouter,
     Form,
-    HTTPException
+    HTTPException,
 )
 
 from app.manager import Manager
 from app.accounts_client import AccountsClient
 
-from api.model import ChatRequest, ChatResponse, DashboardAnalyzeResponse
+from api.model import (
+    ChatRequest,
+    ChatResponse,
+    DashboardAnalyzeResponse,
+)
 
 
 router = APIRouter()
@@ -16,30 +22,41 @@ manager = Manager()
 accounts_client = AccountsClient()
 
 
+def format_error(error: Exception) -> str:
+    return f"{type(error).__name__}: {str(error)}"
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(data: ChatRequest):
     try:
         return manager.chat(data.model_dump())
 
     except Exception as error:
+        traceback.print_exc()
+
         raise HTTPException(
             status_code=400,
-            detail=str(error)
+            detail=format_error(error),
         )
+
 
 @router.post("/dashboard/analyze", response_model=DashboardAnalyzeResponse)
 async def dashboard_analyze(
     token: str = Form(...),
     title: str = Form(...),
     prompt: str | None = Form(None),
-    data_source_id: int = Form(...)
+    data_source_id: int = Form(...),
 ):
     try:
+        clean_title = title.strip() if title and title.strip() else None
         clean_prompt = prompt.strip() if prompt and prompt.strip() else None
+
+        if not clean_title:
+            raise ValueError("Nome do dashboard é obrigatório.")
 
         source_response = accounts_client.get_data_source(
             token=token,
-            data_source_id=data_source_id
+            data_source_id=data_source_id,
         )
 
         data_source = source_response.get("data_source")
@@ -52,19 +69,24 @@ async def dashboard_analyze(
         if not dataset:
             raise ValueError("A fonte de dados não possui dados válidos.")
 
+        if not isinstance(dataset, list):
+            raise ValueError("Os dados da fonte precisam estar em formato de lista.")
+
         data = {
             "token": token,
-            "title": title,
+            "title": clean_title,
             "prompt": clean_prompt,
             "data_source_id": data_source_id,
             "file_name": data_source.get("file_name"),
-            "dataset": dataset
+            "dataset": dataset,
         }
 
         return manager.generate_dashboard(data)
 
     except Exception as error:
+        traceback.print_exc()
+
         raise HTTPException(
             status_code=400,
-            detail=str(error)
+            detail=format_error(error),
         )
