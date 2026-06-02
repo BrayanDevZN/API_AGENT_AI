@@ -118,6 +118,7 @@ REGRAS:
 - Se o título falar conversões, use coluna de conversões.
 - Se não existir a métrica citada no título, mude o título.
 - Para count, metric deve ser [] e aggregation ["count"].
+- Para count, use y como "Quantidade", pois esta é a métrica agregada final exibida no gráfico.
 - Para kpi, chart_type deve ser "kpi".
 - Para scatter, use duas colunas numéricas.
 - Para time_groupby, use coluna temporal real.
@@ -191,7 +192,7 @@ Responda SOMENTE JSON válido.
 REGRAS:
 - Use apenas colunas existentes.
 - Não invente métricas.
-- Para count, y deve ser null.
+- Para count, y deve ser "Quantidade" quando for usado em dashboard ou null quando for apenas interpretação simples.
 - Para sum/mean/max/min/median, y deve ser coluna real.
 - Se for conversa comum, mode chat.
 
@@ -602,7 +603,7 @@ Histórico:
                     aggregation = ["sum"]
             else:
                 metric_list = []
-                y = "count"
+                y = "Quantidade"
                 aggregation = ["count"]
 
             x = time_column
@@ -621,7 +622,7 @@ Histórico:
 
             chart_type = chart_type if chart_type in ["bar", "horizontal_bar", "pie", "donut", "table"] else "bar"
             x = group_by
-            y = "count"
+            y = "Quantidade"
             metric_list = []
             group_by_list = [group_by]
             aggregation = ["count"]
@@ -654,7 +655,7 @@ Histórico:
                 operation = "count"
                 aggregation = ["count"]
                 metric_list = []
-                y = "count"
+                y = "Quantidade"
                 title = f"Quantidade por {group_by}"
             else:
                 metric_list = [metric]
@@ -678,7 +679,7 @@ Histórico:
         if sort not in ["desc", "asc", "none"]:
             sort = "desc"
 
-        return {
+        normalized_chart = {
             "title": title,
             "operation": operation,
             "group_by": group_by_list,
@@ -693,6 +694,8 @@ Histórico:
             "sort": sort,
             "reason": chart.get("reason", ""),
         }
+
+        return self._fix_count_output_contract(normalized_chart)
 
     def _coherent_title(self, title: str, operation: str, metric: str | None, group_or_time: str | None, aggregation: str) -> str:
         if not metric:
@@ -720,6 +723,42 @@ Histórico:
             return f"{prefix} {metric}"
 
         return title
+
+    def _fix_count_output_contract(self, chart: dict) -> dict:
+        """
+        Em gráficos de contagem, o dado agregado final deve usar a mesma chave
+        que o frontend vai procurar no chart_data.
+
+        O pandas/analyzer normalmente gera algo como:
+        {"Região": "Sudeste", "Quantidade": 120}
+
+        Então chart_config.y não pode ser "count", porque essa chave não existe
+        no chart_data final. O contrato correto é y = "Quantidade".
+        """
+        if not isinstance(chart, dict):
+            return chart
+
+        operation = chart.get("operation")
+        aggregations = self._as_list(chart.get("aggregation"))
+        y = chart.get("y")
+
+        is_count_chart = (
+            operation == "count"
+            or "count" in aggregations
+            or self._normalize_name(y) == "count"
+        )
+
+        if is_count_chart:
+            chart["operation"] = "count" if operation != "time_groupby" else operation
+            chart["metric"] = [] if operation != "time_groupby" else chart.get("metric", [])
+            chart["aggregation"] = ["count"]
+            chart["y"] = "Quantidade"
+
+            if not chart.get("title") and chart.get("x"):
+                chart["title"] = f"Quantidade por {chart['x']}"
+
+        return chart
+
 
     def _normalize_limit(self, value, chart_type: str) -> int:
         try:
@@ -843,7 +882,7 @@ Histórico:
                 "aggregation": ["count"],
                 "chart_type": "bar",
                 "x": main_category,
-                "y": "count",
+                "y": "Quantidade",
                 "time_column": None,
                 "time_freq": "M",
                 "limit": 10,
