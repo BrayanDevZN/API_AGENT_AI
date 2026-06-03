@@ -1,10 +1,12 @@
 import traceback
+import json
 
 from fastapi import (
     APIRouter,
     Form,
     HTTPException,
 )
+from fastapi.responses import StreamingResponse
 
 from app.manager import Manager
 from app.accounts_client import AccountsClient
@@ -105,6 +107,52 @@ async def dashboard_analyze(
             status_code=400,
             detail=format_error(error),
         )
+
+
+@router.post("/dashboard/analyze/stream")
+async def dashboard_analyze_stream(
+    token: str = Form(...),
+    title: str = Form(...),
+    prompt: str | None = Form(None),
+    data_source_id: int = Form(...),
+):
+    def stream():
+        try:
+            yield json.dumps({
+                "type": "status",
+                "message": "Carregando fonte de dados.",
+            }, ensure_ascii=False) + "\n"
+
+            data = get_dashboard_data(
+                token=token,
+                title=title,
+                prompt=prompt,
+                data_source_id=data_source_id,
+            )
+
+            yield json.dumps({
+                "type": "status",
+                "message": "Gerando graficos e analise com IA.",
+            }, ensure_ascii=False) + "\n"
+
+            result = manager.generate_dashboard(data)
+
+            yield json.dumps({
+                "type": "complete",
+                "data": result,
+            }, ensure_ascii=False) + "\n"
+
+        except Exception as error:
+            traceback.print_exc()
+            yield json.dumps({
+                "type": "error",
+                "message": format_error(error),
+            }, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/x-ndjson",
+    )
 
 
 @router.post("/dashboard/refresh/analyze", response_model=DashboardRefreshAnalyzeResponse)
