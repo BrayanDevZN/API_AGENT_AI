@@ -164,7 +164,7 @@ class Service:
     def _build_drill_down_config(self, df: pd.DataFrame, chart_plan: dict, chart_x: str | None) -> dict:
         chart_type = chart_plan.get("chart_type")
 
-        if chart_type not in ["bar", "horizontal_bar", "line", "area", "pie", "donut"]:
+        if chart_type not in ["bar", "horizontal_bar", "line", "area", "pie", "donut", "scatter"]:
             return {"enabled": False}
 
         filtered_df = self.pandas_tools.filter_dataframe(
