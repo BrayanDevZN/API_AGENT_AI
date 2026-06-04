@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from datetime import date, datetime
 
 import pandas as pd
@@ -87,6 +88,111 @@ class Service:
             return chart_plan.get("x"), "Quantidade"
 
         return chart_plan.get("x"), chart_plan.get("y")
+
+    def _normalize_name(self, value) -> str:
+        text = str(value or "").strip().lower()
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        return text.replace("_", " ")
+
+    def _find_column_by_aliases(self, columns: list[str], aliases: list[str]) -> str | None:
+        normalized_aliases = [self._normalize_name(alias) for alias in aliases]
+
+        for column in columns:
+            if self._normalize_name(column) in normalized_aliases:
+                return column
+
+        for column in columns:
+            normalized_column = self._normalize_name(column)
+
+            if any(alias in normalized_column for alias in normalized_aliases):
+                return column
+
+        return None
+
+    def _normalize_drill_hierarchy(self, df: pd.DataFrame, chart_plan: dict) -> list[dict]:
+        columns = [str(column) for column in df.columns]
+        requested = chart_plan.get("drill_down_hierarchy") or []
+        hierarchy = []
+
+        for column in requested:
+            found = self._find_column_by_aliases(columns, [column])
+
+            if found and found not in [item["column"] for item in hierarchy]:
+                hierarchy.append({"column": found, "label": found})
+
+        if len(hierarchy) >= 2:
+            return hierarchy
+
+        templates = [
+            [
+                ["regiao", "região", "region"],
+                ["estado", "uf", "state"],
+                ["cidade", "municipio", "city"],
+            ],
+            [
+                ["categoria", "category", "categoria produto"],
+                ["produto", "product", "item", "sku"],
+            ],
+        ]
+
+        for template in templates:
+            inferred = []
+
+            for aliases in template:
+                found = self._find_column_by_aliases(columns, aliases)
+
+                if found:
+                    inferred.append({"column": found, "label": found})
+
+            if len(inferred) >= 2:
+                x_column = chart_plan.get("x")
+                start_index = next(
+                    (
+                        index for index, item in enumerate(inferred)
+                        if self._normalize_name(item["column"]) == self._normalize_name(x_column)
+                    ),
+                    0,
+                )
+
+                sliced = inferred[start_index:]
+
+                return sliced if len(sliced) >= 2 else inferred
+
+        return []
+
+    def _build_drill_down_config(self, df: pd.DataFrame, chart_plan: dict, chart_x: str | None) -> dict:
+        chart_type = chart_plan.get("chart_type")
+
+        if chart_type not in ["bar", "horizontal_bar", "line", "area", "pie", "donut"]:
+            return {"enabled": False}
+
+        filtered_df = self.pandas_tools.filter_dataframe(
+            df=df,
+            filters=chart_plan.get("filters") or [],
+        )
+
+        if filtered_df.empty:
+            return {"enabled": False}
+
+        hierarchy = self._normalize_drill_hierarchy(filtered_df, chart_plan)
+        time_column = chart_plan.get("time_column") if chart_plan.get("operation") == "time_groupby" else None
+
+        if len(hierarchy) < 2 and not time_column:
+            return {"enabled": False}
+
+        metric = chart_plan.get("metric") or []
+        metric_column = metric[0] if isinstance(metric, list) and metric else chart_plan.get("y")
+
+        rows = filtered_df.head(5000).to_dict(orient="records")
+
+        return {
+            "enabled": True,
+            "hierarchy": hierarchy,
+            "metric_column": metric_column,
+            "time_column": time_column or chart_x,
+            "rows": self._make_json_safe(rows),
+        }
 
     def analyze(self, data: dict):
         token = data.get("token")
@@ -243,6 +349,11 @@ class Service:
                 chart_plan=chart_plan,
                 operation=operation,
             )
+            drill_down = self._build_drill_down_config(
+                df=df,
+                chart_plan=chart_plan,
+                chart_x=chart_x,
+            )
 
             all_charts_data.append({
                 "index": index + 1,
@@ -253,6 +364,7 @@ class Service:
                 "y": chart_y,
                 "aggregation": chart_plan.get("aggregation"),
                 "filters": chart_plan.get("filters", []),
+                "drill_down": drill_down,
                 "reason": chart_plan.get("reason", ""),
                 "plan": self._make_json_safe(chart_plan),
                 "data": metrics,
@@ -311,6 +423,7 @@ class Service:
                     "aggregation": chart_data["aggregation"],
                     "operation": chart_data["operation"],
                     "filters": chart_data.get("filters", []),
+                    "drill_down": chart_data.get("drill_down", {"enabled": False}),
                     "reason": chart_data["reason"],
                 },
             )

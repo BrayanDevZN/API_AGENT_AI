@@ -200,6 +200,7 @@ FORMATO:
       "y": "coluna_y_ou_null",
       "time_column": "coluna_data_ou_null",
       "time_freq": "D | W | M | Q | Y",
+      "drill_down_hierarchy": ["coluna_nivel_1", "coluna_nivel_2", "coluna_nivel_3"],
       "filters": [
         {
           "column": "coluna_existente",
@@ -227,6 +228,10 @@ REGRAS:
 - Use kpi para um unico numero importante.
 - Use table quando o usuario pedir detalhes, listagem ou dados brutos.
 - Use pie/donut apenas para composicao percentual com poucas categorias, idealmente entre 2 e 6 valores.
+- Use drill_down_hierarchy quando houver colunas hierarquicas compativeis.
+- Hierarquias recomendadas: Localizacao Regiao > Estado > Cidade; Tempo Ano > Trimestre > Mes > Dia; Produtos Categoria > Produto.
+- drill_down_hierarchy deve conter apenas colunas reais do schema, na ordem do nivel mais amplo para o mais detalhado.
+- Se a hierarquia depender de uma coluna de data unica, use time_column e deixe drill_down_hierarchy vazio.
 - Use apenas colunas existentes no schema.
 - Nunca invente coluna.
 - Não use métrica derivada se ela não existir.
@@ -886,6 +891,17 @@ Histórico:
 
         return result
 
+    def _normalize_drill_down_hierarchy(self, hierarchy, columns: list[str]) -> list[str]:
+        resolved = []
+
+        for column in self._as_list(hierarchy):
+            found = self._find_column(column, columns)
+
+            if found and found not in resolved:
+                resolved.append(found)
+
+        return resolved if len(resolved) >= 2 else []
+
     def _safe_json(self, output_text: str, columns: list[str] | None = None) -> dict:
         columns = columns or []
 
@@ -1223,6 +1239,10 @@ Histórico:
             "y": y,
             "time_column": time_column if operation == "time_groupby" else None,
             "time_freq": time_freq,
+            "drill_down_hierarchy": self._normalize_drill_down_hierarchy(
+                chart.get("drill_down_hierarchy"),
+                columns,
+            ),
             "filters": self._normalize_filters(chart.get("filters"), columns),
             "limit": limit,
             "sort": sort,
@@ -1547,6 +1567,7 @@ Histórico:
             "y": first_chart["y"],
             "time_column": first_chart["time_column"],
             "time_freq": first_chart["time_freq"],
+            "drill_down_hierarchy": first_chart.get("drill_down_hierarchy", []),
             "filters": first_chart.get("filters", []),
             "limit": first_chart["limit"],
             "sort": first_chart["sort"],
