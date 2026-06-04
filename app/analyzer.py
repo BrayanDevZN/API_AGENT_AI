@@ -1,5 +1,7 @@
 import pandas as pd
 
+from app.pandas_tools import PandasTools
+
 
 class Analyzer:
     VALID_CHART_TYPES = {
@@ -36,6 +38,9 @@ class Analyzer:
 
     VALID_TIME_FREQS = {"D", "W", "M", "Q", "Y"}
 
+    def __init__(self):
+        self.pandas_tools = PandasTools()
+
     def run(self, dataset: list[dict], interpretation: dict | None) -> dict:
         interpretation = interpretation or {}
 
@@ -48,6 +53,10 @@ class Analyzer:
             return self._empty_chart(interpretation)
 
         df = self._normalize_dataframe_columns(df)
+        df = self.pandas_tools.filter_dataframe(df, interpretation.get("filters") or [])
+
+        if df.empty:
+            return self._empty_chart(interpretation)
 
         chart_type = interpretation.get("chart_type", "none")
         operation = interpretation.get("operation")

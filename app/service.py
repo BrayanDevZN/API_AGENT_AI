@@ -109,11 +109,16 @@ class Service:
 
         if dataset:
             columns = list(dataset[0].keys())
+            unique_values = self.pandas_tools.unique_values(
+                df=pd.DataFrame(dataset),
+                columns=columns,
+            )
 
             interpretation = self.interpreter.run(
                 question=question,
                 columns=columns,
                 messages=messages,
+                unique_values=unique_values,
             )
 
             chart = {
@@ -200,6 +205,10 @@ class Service:
             raise ValueError("Dataset sem dados após limpeza.")
 
         schema = self.profiler.profile(df)
+        schema["unique_values"] = self.pandas_tools.unique_values(
+            df=df,
+            columns=schema.get("categorical_columns", []),
+        )
         schema = self._make_json_safe(schema)
 
         plan = self.interpreter.dashboard_plan(
@@ -243,6 +252,7 @@ class Service:
                 "x": chart_x,
                 "y": chart_y,
                 "aggregation": chart_plan.get("aggregation"),
+                "filters": chart_plan.get("filters", []),
                 "reason": chart_plan.get("reason", ""),
                 "plan": self._make_json_safe(chart_plan),
                 "data": metrics,
@@ -300,6 +310,7 @@ class Service:
                     "y": chart_data["y"],
                     "aggregation": chart_data["aggregation"],
                     "operation": chart_data["operation"],
+                    "filters": chart_data.get("filters", []),
                     "reason": chart_data["reason"],
                 },
             )

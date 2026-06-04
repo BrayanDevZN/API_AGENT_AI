@@ -153,9 +153,9 @@ class Interpreter:
         self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
         self.model = Settings.OPENAI_MODEL
 
-    def run(self, question: str, columns: list[str], messages: list) -> dict:
+    def run(self, question: str, columns: list[str], messages: list, unique_values: dict | None = None) -> dict:
         prompt = (
-            self._analysis_prompt(question, columns, messages)
+            self._analysis_prompt(question, columns, messages, unique_values or {})
             if columns
             else self._chat_prompt(question, messages)
         )
@@ -200,6 +200,13 @@ FORMATO:
       "y": "coluna_y_ou_null",
       "time_column": "coluna_data_ou_null",
       "time_freq": "D | W | M | Q | Y",
+      "filters": [
+        {
+          "column": "coluna_existente",
+          "operator": "equals | not_equals | contains | in",
+          "value": "valor_exato_ou_lista_de_valores"
+        }
+      ],
       "limit": 10,
       "sort": "desc | asc | none",
       "reason": "motivo curto"
@@ -208,6 +215,18 @@ FORMATO:
 }
 
 REGRAS:
+- Use filters quando o pedido limitar a analise a um subconjunto, como Status = APROVADO.
+- Antes de criar filters, consulte schema.unique_values para usar exatamente o valor real da coluna, preservando maiusculas, minusculas, acentos e espacos.
+- Se o usuario pedir "aprovado" e schema.unique_values mostrar "APROVADO", use value "APROVADO".
+- Se nao houver valor correspondente em schema.unique_values, nao invente filtro.
+- Use bar para comparar poucas categorias lado a lado.
+- Use horizontal_bar para rankings, nomes longos ou muitas categorias.
+- Use line para evolucao temporal com datas ordenadas.
+- Use area para evolucao temporal acumulada ou volume ao longo do tempo.
+- Use scatter somente para relacao entre duas colunas numericas.
+- Use kpi para um unico numero importante.
+- Use table quando o usuario pedir detalhes, listagem ou dados brutos.
+- Use pie/donut apenas para composicao percentual com poucas categorias, idealmente entre 2 e 6 valores.
 - Use apenas colunas existentes no schema.
 - Nunca invente coluna.
 - Não use métrica derivada se ela não existir.
@@ -285,7 +304,9 @@ Histórico:
 {json.dumps(messages, ensure_ascii=False)}
 """
 
-    def _analysis_prompt(self, question: str, columns: list[str], messages: list) -> str:
+    def _analysis_prompt(self, question: str, columns: list[str], messages: list, unique_values: dict | None = None) -> str:
+        unique_values = unique_values or {}
+
         return f"""
 Você interpreta pedidos de gráfico.
 
@@ -298,6 +319,13 @@ Responda SOMENTE JSON válido.
   "aggregation": "sum | mean | count | max | min | median | none",
   "mode": "analysis | chat",
   "reason": "explicacao_curta",
+  "filters": [
+    {
+      "column": "coluna_existente",
+      "operator": "equals | not_equals | contains | in",
+      "value": "valor_exato_ou_lista_de_valores"
+    }
+  ],
   "rename_columns": {{
     "nome_original": "Nome Intuitivo"
   }}
@@ -308,6 +336,9 @@ REGRAS:
 - Não invente métricas.
 - Para count, y deve ser "Quantidade" quando for usado em dashboard ou null quando for apenas interpretação simples.
 - Para sum/mean/max/min/median, y deve ser coluna real.
+- Use filters quando o usuario pedir a analise somente para um subconjunto de linhas.
+- Antes de criar filters, consulte Valores unicos para usar exatamente o valor real da coluna.
+- Se o usuario pedir "aprovado" e Valores unicos mostrar "APROVADO", use value "APROVADO".
 - Se for conversa comum, mode chat.
 
 Pergunta:
@@ -315,6 +346,9 @@ Pergunta:
 
 Colunas:
 {json.dumps(columns, ensure_ascii=False)}
+
+Valores unicos:
+{json.dumps(unique_values, ensure_ascii=False)}
 
 Histórico:
 {json.dumps(messages, ensure_ascii=False)}
@@ -800,6 +834,58 @@ Histórico:
 
         return result
 
+    def _normalize_filters(self, filters, columns: list[str]) -> list[dict]:
+        if isinstance(filters, dict):
+            filters = [filters]
+
+        if not isinstance(filters, list):
+            return []
+
+        result = []
+        valid_operators = {"equals", "not_equals", "contains", "in"}
+
+        for filter_spec in filters:
+            if not isinstance(filter_spec, dict):
+                continue
+
+            column = self._find_column(filter_spec.get("column"), columns)
+
+            if not column:
+                continue
+
+            operator = str(filter_spec.get("operator") or "equals").strip().lower()
+
+            if operator not in valid_operators:
+                operator = "equals"
+
+            value = filter_spec.get("value")
+
+            if value is None:
+                continue
+
+            if isinstance(value, list):
+                clean_value = [
+                    str(item).strip()
+                    for item in value
+                    if item is not None and str(item).strip()
+                ]
+
+                if not clean_value:
+                    continue
+            else:
+                clean_value = str(value).strip()
+
+                if not clean_value:
+                    continue
+
+            result.append({
+                "column": column,
+                "operator": operator,
+                "value": clean_value,
+            })
+
+        return result
+
     def _safe_json(self, output_text: str, columns: list[str] | None = None) -> dict:
         columns = columns or []
 
@@ -850,6 +936,7 @@ Histórico:
             "aggregation": aggregation,
             "mode": mode,
             "reason": data.get("reason", ""),
+            "filters": self._normalize_filters(data.get("filters"), columns),
             "rename_columns": self._clean_rename_columns(data.get("rename_columns", {}), columns),
         }
 
@@ -1136,6 +1223,7 @@ Histórico:
             "y": y,
             "time_column": time_column if operation == "time_groupby" else None,
             "time_freq": time_freq,
+            "filters": self._normalize_filters(chart.get("filters"), columns),
             "limit": limit,
             "sort": sort,
             "reason": chart.get("reason", ""),
@@ -1459,6 +1547,7 @@ Histórico:
             "y": first_chart["y"],
             "time_column": first_chart["time_column"],
             "time_freq": first_chart["time_freq"],
+            "filters": first_chart.get("filters", []),
             "limit": first_chart["limit"],
             "sort": first_chart["sort"],
         }

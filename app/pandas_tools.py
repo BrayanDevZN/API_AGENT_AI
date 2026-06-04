@@ -1,3 +1,5 @@
+import re
+
 import pandas as pd
 
 
@@ -22,6 +24,82 @@ class PandasTools:
         "none",
     }
 
+    VALID_FILTER_OPERATORS = {
+        "equals",
+        "not_equals",
+        "contains",
+        "in",
+    }
+
+    def unique_values(self, df, columns=None, limit: int = 30) -> dict:
+        if df is None or df.empty:
+            return {}
+
+        temp_df = self._normalize_dataframe_columns(df)
+        resolved_columns = self._resolve_columns(temp_df, columns)
+
+        if not resolved_columns:
+            resolved_columns = [
+                column for column in temp_df.columns
+                if not pd.api.types.is_numeric_dtype(temp_df[column])
+            ]
+
+        result = {}
+
+        for column in resolved_columns:
+            values = (
+                temp_df[column]
+                .dropna()
+                .astype(str)
+                .map(str.strip)
+            )
+            values = values[values != ""].drop_duplicates().head(limit).tolist()
+
+            result[column] = values
+
+        return result
+
+    def filter_dataframe(self, df, filters: list[dict]) -> pd.DataFrame:
+        if df is None or df.empty or not filters:
+            return df
+
+        filtered_df = self._normalize_dataframe_columns(df)
+
+        for filter_spec in filters:
+            if not isinstance(filter_spec, dict):
+                continue
+
+            column = self._find_column(filtered_df, filter_spec.get("column"))
+
+            if not column:
+                continue
+
+            operator = str(filter_spec.get("operator") or "equals").strip().lower()
+
+            if operator not in self.VALID_FILTER_OPERATORS:
+                operator = "equals"
+
+            raw_value = filter_spec.get("value")
+            values = self._as_list(raw_value)
+
+            if not values:
+                continue
+
+            series = filtered_df[column].astype(str).str.strip()
+            clean_values = [str(value).strip() for value in values]
+
+            if operator == "equals":
+                filtered_df = filtered_df[series.isin(clean_values)]
+            elif operator == "not_equals":
+                filtered_df = filtered_df[~series.isin(clean_values)]
+            elif operator == "contains":
+                pattern = "|".join(re.escape(value) for value in clean_values)
+                filtered_df = filtered_df[series.str.contains(pattern, case=False, na=False)]
+            elif operator == "in":
+                filtered_df = filtered_df[series.isin(clean_values)]
+
+        return filtered_df
+
     def execute(self, df, plan: dict) -> list[dict]:
         if df is None or df.empty:
             return []
@@ -30,6 +108,10 @@ class PandasTools:
             return []
 
         df = self._normalize_dataframe_columns(df)
+        df = self.filter_dataframe(df, plan.get("filters") or [])
+
+        if df.empty:
+            return []
 
         operation = plan.get("operation") or "groupby"
 
