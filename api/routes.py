@@ -26,6 +26,19 @@ accounts_client = AccountsClient()
 
 
 def format_error(error: Exception) -> str:
+    raw_message = str(error)
+    lowered_message = raw_message.lower()
+
+    if (
+        "string_above_max_length" in lowered_message
+        or "string too long" in lowered_message
+        or "maximum length" in lowered_message
+    ):
+        return (
+            "A fonte é grande demais para análise geral. "
+            "Gere com um prompt mais específico ou reduza a fonte."
+        )
+
     return f"{type(error).__name__}: {str(error)}"
 
 

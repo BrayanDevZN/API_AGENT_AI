@@ -13,6 +13,13 @@ from app.data_profiler import DataProfiler
 from app.pandas_tools import PandasTools
 
 
+AI_PAYLOAD_MAX_CHARS = 700_000
+AI_UNIQUE_VALUES_LIMIT = 8
+AI_COMPACT_UNIQUE_VALUES_LIMIT = 3
+AI_CHART_DATA_LIMIT = 40
+AI_COMPACT_CHART_DATA_LIMIT = 12
+
+
 class Service:
     def __init__(self):
         self.accounts = AccountsClient()
@@ -78,6 +85,184 @@ class Service:
                 ensure_ascii=False,
                 default=str,
             )
+        )
+
+    def _json_size(self, value) -> int:
+        return len(
+            json.dumps(
+                self._make_json_safe(value),
+                ensure_ascii=False,
+                default=str,
+            )
+        )
+
+    def _truncate_text(self, value, limit: int = 500):
+        if not isinstance(value, str):
+            return value
+
+        if len(value) <= limit:
+            return value
+
+        return f"{value[:limit].rstrip()}..."
+
+    def _limit_dict_lists(self, value, limit: int) -> dict:
+        if not isinstance(value, dict):
+            return {}
+
+        compact = {}
+
+        for key, items in value.items():
+            if isinstance(items, list):
+                compact[key] = [
+                    self._truncate_text(item, 120)
+                    for item in items[:limit]
+                ]
+            else:
+                compact[key] = items
+
+        return compact
+
+    def _compact_schema_for_ai(self, schema: dict, unique_values_limit: int = AI_UNIQUE_VALUES_LIMIT) -> dict:
+        compact = dict(schema or {})
+        compact["unique_values"] = self._limit_dict_lists(
+            compact.get("unique_values", {}),
+            unique_values_limit,
+        )
+
+        compact_columns = []
+
+        for column in compact.get("columns", []):
+            if not isinstance(column, dict):
+                compact_columns.append(column)
+                continue
+
+            compact_column = dict(column)
+            compact_column["sample"] = [
+                self._truncate_text(item, 120)
+                for item in (compact_column.get("sample") or [])[:3]
+            ]
+            compact_columns.append(compact_column)
+
+        compact["columns"] = compact_columns
+        return self._make_json_safe(compact)
+
+    def _compact_plan_for_ai(self, plan: dict, chart_limit: int | None = None) -> dict:
+        compact = dict(plan or {})
+        charts = compact.get("charts")
+
+        if isinstance(charts, list):
+            limited_charts = charts[:chart_limit] if chart_limit else charts
+            compact["charts"] = [
+                self._compact_chart_plan_for_ai(chart)
+                for chart in limited_charts
+                if isinstance(chart, dict)
+            ]
+
+        if "business_context" in compact:
+            compact["business_context"] = self._truncate_text(
+                compact.get("business_context"),
+                300,
+            )
+
+        return self._make_json_safe(compact)
+
+    def _compact_chart_plan_for_ai(self, chart_plan: dict) -> dict:
+        allowed_keys = {
+            "title",
+            "operation",
+            "chart_type",
+            "group_by",
+            "metric",
+            "aggregation",
+            "x",
+            "y",
+            "time_column",
+            "time_freq",
+            "filters",
+            "limit",
+            "sort",
+            "reason",
+        }
+        compact = {
+            key: value
+            for key, value in chart_plan.items()
+            if key in allowed_keys
+        }
+
+        if "reason" in compact:
+            compact["reason"] = self._truncate_text(compact.get("reason"), 250)
+
+        return compact
+
+    def _compact_chart_for_ai(self, chart: dict, data_limit: int = AI_CHART_DATA_LIMIT) -> dict:
+        compact = {}
+
+        for key, value in (chart or {}).items():
+            if key == "drill_down":
+                drill_down = dict(value or {})
+                drill_down.pop("rows", None)
+                compact[key] = drill_down
+                continue
+
+            if key == "plan":
+                compact[key] = self._compact_chart_plan_for_ai(value or {})
+                continue
+
+            if key == "data" and isinstance(value, list):
+                compact[key] = value[:data_limit]
+                compact["data_sampled"] = len(value) > data_limit
+                compact["data_total_rows"] = len(value)
+                continue
+
+            if key == "reason":
+                compact[key] = self._truncate_text(value, 250)
+                continue
+
+            compact[key] = value
+
+        return self._make_json_safe(compact)
+
+    def _build_ai_dashboard_payload(
+        self,
+        charts: list[dict],
+        schema: dict,
+        plan: dict,
+    ) -> tuple[list[dict], dict, dict]:
+        charts_for_ai = [
+            self._compact_chart_for_ai(chart, AI_CHART_DATA_LIMIT)
+            for chart in charts
+        ]
+        schema_for_ai = self._compact_schema_for_ai(schema, AI_UNIQUE_VALUES_LIMIT)
+        plan_for_ai = self._compact_plan_for_ai(plan)
+
+        payload = {
+            "charts": charts_for_ai,
+            "schema": schema_for_ai,
+            "plan": plan_for_ai,
+        }
+
+        if self._json_size(payload) <= AI_PAYLOAD_MAX_CHARS:
+            return charts_for_ai, schema_for_ai, plan_for_ai
+
+        charts_for_ai = [
+            self._compact_chart_for_ai(chart, AI_COMPACT_CHART_DATA_LIMIT)
+            for chart in charts[:6]
+        ]
+        schema_for_ai = self._compact_schema_for_ai(schema, AI_COMPACT_UNIQUE_VALUES_LIMIT)
+        plan_for_ai = self._compact_plan_for_ai(plan, chart_limit=6)
+
+        payload = {
+            "charts": charts_for_ai,
+            "schema": schema_for_ai,
+            "plan": plan_for_ai,
+        }
+
+        if self._json_size(payload) <= AI_PAYLOAD_MAX_CHARS:
+            return charts_for_ai, schema_for_ai, plan_for_ai
+
+        raise ValueError(
+            "A fonte é grande demais para análise geral. "
+            "Gere com um prompt mais específico ou reduza a fonte."
         )
 
     def _get_chart_axis(self, chart_plan: dict, operation: str) -> tuple[str | None, str | None]:
@@ -314,12 +499,14 @@ class Service:
         schema["unique_values"] = self.pandas_tools.unique_values(
             df=df,
             columns=schema.get("categorical_columns", []),
+            limit=AI_UNIQUE_VALUES_LIMIT,
         )
         schema = self._make_json_safe(schema)
+        schema_for_plan = self._compact_schema_for_ai(schema)
 
         plan = self.interpreter.dashboard_plan(
             prompt=prompt,
-            schema=schema,
+            schema=schema_for_plan,
         )
 
         plan = self._make_json_safe(plan)
@@ -371,12 +558,17 @@ class Service:
             })
 
         all_charts_data = self._make_json_safe(all_charts_data)
-
-        ai_suggestion = self.generator.dashboard_analysis_multi(
-            prompt=prompt,
+        charts_for_ai, schema_for_ai, plan_for_ai = self._build_ai_dashboard_payload(
             charts=all_charts_data,
             schema=schema,
             plan=plan,
+        )
+
+        ai_suggestion = self.generator.dashboard_analysis_multi(
+            prompt=prompt,
+            charts=charts_for_ai,
+            schema=schema_for_ai,
+            plan=plan_for_ai,
         )
 
         return self._ensure_json_safe({
