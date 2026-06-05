@@ -216,6 +216,19 @@ FORMATO:
 }
 
 REGRAS:
+- Pense como um analista de dados montando um dashboard executivo, nao como alguem preenchendo espaco com graficos.
+- Priorize perguntas de negocio: tamanho do resultado, principais drivers, evolucao no tempo, concentracao por categoria, desempenho por segmento e possiveis outliers.
+- Para analise geral, monte uma narrativa visual com esta ordem quando houver colunas compativeis: 1 KPI principal, 1 ranking por dimensao relevante, 1 evolucao temporal, 1 composicao percentual somente se fizer sentido, 1 relacao entre metricas numericas e 1 tabela curta apenas se ela ajudar a investigar detalhes.
+- Escolha metricas que representem resultado ou volume real. Exemplos: receita, valor, vendas, pedidos, lucro, custo, investimento, conversoes, cliques, quantidade, tempo, nota ou satisfacao.
+- Escolha dimensoes que expliquem variacao. Exemplos: produto, categoria, canal, campanha, regiao, cidade, cliente, status, departamento, cargo, vendedor ou etapa.
+- Evite graficos decorativos, repetidos ou obvios. Nao crie dois rankings quase iguais mudando apenas o titulo.
+- Evite usar IDs, codigos, emails, telefones, URLs, nomes muito unicos ou textos longos como dimensao principal, a menos que o usuario peca detalhes.
+- Nao use tabela como primeiro grafico em analise geral se houver metricas numericas e categorias uteis.
+- Para datasets grandes, prefira agregacoes, rankings top N, KPIs e series temporais em vez de dados brutos.
+- Se existir coluna temporal e metrica numerica relevante, inclua uma tendencia temporal.
+- Se existirem duas metricas numericas de negocio, use scatter somente quando a relacao puder responder algo util, como investimento vs receita ou cliques vs conversoes.
+- Use pie/donut apenas quando a pergunta for participacao/composicao e a dimensao tiver poucas categorias claras.
+- Cada "reason" deve explicar a pergunta analitica respondida pelo grafico, nao apenas repetir o tipo do grafico.
 - Use filters quando o pedido limitar a analise a um subconjunto, como Status = APROVADO.
 - Antes de criar filters, consulte schema.unique_values para usar exatamente o valor real da coluna, preservando maiusculas, minusculas, acentos e espacos.
 - Se o usuario pedir "aprovado" e schema.unique_values mostrar "APROVADO", use value "APROVADO".
@@ -1349,6 +1362,14 @@ Histórico:
             ["receita", "valor", "total", "vendas", "quantidade", "cliques", "conversões", "conversoes"],
         )
 
+        secondary_metric = self._preferred_column(
+            [
+                column for column in numeric_columns
+                if column != main_metric
+            ],
+            ["lucro", "custo", "investimento", "pedidos", "clientes", "cliques", "impressoes", "conversoes", "quantidade"],
+        )
+
         main_category = self._preferred_column(
             categorical_columns,
             ["categoria", "produto", "campanha", "canal", "cliente", "região", "regiao", "status"],
@@ -1410,21 +1431,38 @@ Histórico:
                 "reason": "Tendência temporal.",
             })
 
-        if len(numeric_columns) >= 2:
+        if main_category:
             charts.append({
-                "title": f"Relação entre {numeric_columns[0]} e {numeric_columns[1]}",
+                "title": f"Quantidade por {main_category}",
+                "operation": "count",
+                "group_by": [main_category],
+                "metric": [],
+                "aggregation": ["count"],
+                "chart_type": "donut" if main_metric else "bar",
+                "x": main_category,
+                "y": "Quantidade",
+                "time_column": None,
+                "time_freq": "M",
+                "limit": 6 if main_metric else 10,
+                "sort": "desc",
+                "reason": "Mostra concentracao de registros por categoria.",
+            })
+
+        if main_metric and secondary_metric:
+            charts.append({
+                "title": f"Relacao entre {main_metric} e {secondary_metric}",
                 "operation": "scatter",
                 "group_by": [],
-                "metric": [numeric_columns[1]],
+                "metric": [secondary_metric],
                 "aggregation": ["none"],
                 "chart_type": "scatter",
-                "x": numeric_columns[0],
-                "y": numeric_columns[1],
+                "x": main_metric,
+                "y": secondary_metric,
                 "time_column": None,
                 "time_freq": "M",
                 "limit": 20,
                 "sort": "none",
-                "reason": "Relação entre duas variáveis numéricas.",
+                "reason": "Mostra se duas metricas de negocio variam juntas.",
             })
 
         if main_category and not main_metric:
