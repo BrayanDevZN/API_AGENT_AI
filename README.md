@@ -1,387 +1,313 @@
-<div align="center">
+# DataPilot AI Agent API
 
-# 🤖 AI Data Analysis API
+API responsavel pela camada inteligente do DataPilot. Ela recebe perguntas do usuario, consulta a API de contas para validar identidade e historico, interpreta datasets com apoio de IA, executa transformacoes com pandas e devolve respostas, graficos e sugestoes analiticas para o frontend.
 
-**Agente inteligente de análise de dados com conversa contextual**
+## Visao geral
 
+O `AI AGENT` e o servico de inteligencia da plataforma. Ele nao armazena usuarios nem dashboards diretamente; essa responsabilidade fica na API `DATABASE`. O agente atua como um orquestrador analitico:
 
+- valida o token do usuario na API de contas;
+- recupera historico de conversa quando necessario;
+- interpreta prompts de chat e de dashboard;
+- limpa e perfila dados tabulares;
+- gera planos de graficos com IA;
+- executa agregacoes de dados com pandas;
+- cria insights em linguagem natural;
+- chama a API de contas para salvar dashboards gerados.
 
-</div>
+## Tecnologias
 
+| Tecnologia | Uso no projeto |
+| --- | --- |
+| Python | Linguagem principal da API |
+| FastAPI | Framework HTTP, definicao das rotas e validacao de entrada |
+| Uvicorn | Servidor ASGI usado em desenvolvimento e deploy |
+| Pydantic | Schemas de request/response |
+| OpenAI API | Interpretacao de prompts e geracao de textos analiticos |
+| pandas | Limpeza, agrupamento, agregacao e preparacao dos dados |
+| python-dotenv | Carregamento de configuracoes locais |
+| requests | Integracao com a API de contas/dados |
+| StreamingResponse | Resposta incremental em NDJSON para status de geracao |
 
+## Arquitetura
 
-## 🧠 Sobre o projeto
-
-A **AI Data Analysis API** é um backend inteligente que combina **modelos de linguagem** com **análise de dados via pandas** para oferecer uma experiência conversacional sobre qualquer dataset.
-
-Ela foi projetada para **separar responsabilidades** de forma clara: a IA interpreta intenções e gera respostas em linguagem natural, enquanto o pandas executa os cálculos. Isso reduz custo de tokens, aumenta precisão e facilita manutenção.
-
-> ⚠️ **A API não renderiza gráficos.** Ela retorna apenas a estrutura de dados para que o frontend construa a visualização.
-
----
-
-## ✨ Funcionalidades
-
-| Funcionalidade | Descrição |
-|---|---|
-| 💬 **Conversa contextual** | Mantém histórico por usuário e conversa |
-| 🔍 **Interpretação de intenção** | Identifica automaticamente o que o usuário quer analisar |
-| 📊 **Análise de datasets** | Processa dados com pandas (sum, mean, count, max, min) |
-| 📈 **Estrutura de gráficos** | Gera o schema de dados para o frontend renderizar |
-| 💡 **Insights automáticos** | Produz conclusões e recomendações em linguagem natural |
-| 📁 **Upload de arquivos** | Aceita CSV, Excel e JSON diretamente |
-| 🔐 **Autenticação JWT** | Valida identidade do usuário em cada requisição |
-
----
-
-## 🏗️ Arquitetura
-
-### Fluxo da aplicação
-
-```
-Usuário
-   ↓
-Routes         → valida entrada HTTP, recebe arquivos
-   ↓
-Service        → orquestra o fluxo, valida JWT, busca histórico
-   ↓
-Interpreter    → entende a intenção: chat ou análise?
-   ↓
-Analyzer*      → processa dataset com pandas (*apenas se análise)
-   ↓
-Generator      → gera resposta natural ou insights via IA
-   ↓
-Resposta final
+```text
+Cliente / Frontend
+      |
+      v
+api/routes.py
+      |
+      v
+app/manager.py
+      |
+      v
+app/service.py
+      |
+      +--> app/accounts_client.py  -> API DATABASE
+      +--> app/interpreter.py      -> OpenAI interpreta pedido/plano
+      +--> app/data_cleaner.py     -> Normalizacao do dataset
+      +--> app/data_profiler.py    -> Perfil das colunas
+      +--> app/pandas_tools.py     -> Operacoes tabulares
+      +--> app/analyzer.py         -> Graficos simples/legados
+      +--> app/generator.py        -> Respostas e insights
 ```
 
-### Módulos
+### Responsabilidades por camada
 
-```
-📦 projeto/
-├── main.py            # Inicialização da API e registro de rotas
-├── routes.py          # Camada HTTP (endpoints, validação de entrada)
-├── service.py         # Orquestrador principal (JWT, histórico, fluxo)
-├── interpreter.py     # Interpretador de intenção (chat vs análise)
-├── analyzer.py        # Motor analítico com pandas
-├── generator.py       # Geração de respostas e insights via IA
-├── file_reader.py     # Leitura de CSV, Excel e JSON → list[dict]
-└── accounts_client.py # Cliente da API externa de autenticação
-```
+| Camada | Arquivos | Responsabilidade |
+| --- | --- | --- |
+| Entrada HTTP | `api/routes.py` | Expõe rotas, recebe JSON/FormData, trata erros e retorna respostas HTTP |
+| Schemas | `api/model.py` | Define contratos Pydantic para chat e dashboards |
+| Orquestracao | `app/manager.py`, `app/service.py` | Coordena validacao, historico, IA, pandas e persistencia externa |
+| Integracao externa | `app/accounts_client.py` | Chama a API `DATABASE` para validar token, buscar fontes e salvar dashboards |
+| Inteligencia | `app/interpreter.py`, `app/generator.py` | Usa OpenAI para interpretar prompts e gerar analises |
+| Dados | `app/data_cleaner.py`, `app/data_profiler.py`, `app/pandas_tools.py`, `app/analyzer.py` | Limpa, descreve, agrega e estrutura dados para graficos |
+| Configuracao | `core/config.py` | Carrega variaveis de ambiente |
 
-#### Detalhes de cada módulo
+## Fluxos principais
 
-<details>
-<summary><strong>service.py</strong> — Cérebro da aplicação</summary>
+### Chat
 
-Responsável por orquestrar todo o fluxo:
-1. Valida o token JWT
-2. Busca o histórico de mensagens do usuário
-3. Chama o `interpreter` para entender a intenção
-4. Decide se aciona o `analyzer`
-5. Chama o `generator` para montar a resposta final
-
-</details>
-
-<details>
-<summary><strong>interpreter.py</strong> — Interpretador de intenção</summary>
-
-Recebe a pergunta do usuário e decide:
-- É conversa comum ou análise de dados?
-- Qual tipo de gráfico usar?
-- Quais colunas do dataset são relevantes?
-- Qual agregação aplicar?
-
-Exemplo de saída:
-```json
-{
-  "chart_type": "bar",
-  "x": "produto",
-  "y": "vendas",
-  "aggregation": "sum",
-  "mode": "analysis"
-}
+```text
+POST /chat
+  -> valida token na API DATABASE
+  -> busca mensagens da conversa
+  -> envia pergunta + historico para o generator
+  -> retorna answer
 ```
 
-</details>
+### Geracao de dashboard
 
-<details>
-<summary><strong>analyzer.py</strong> — Motor analítico</summary>
+```text
+POST /dashboard/analyze
+  -> recebe token, titulo, prompt e data_source_id
+  -> busca a fonte de dados na API DATABASE
+  -> limpa e perfila o dataset
+  -> cria plano de graficos com IA
+  -> executa agregacoes com pandas
+  -> gera analise textual
+  -> salva dashboard e graficos na API DATABASE
+  -> retorna dashboard, charts, ai_suggestion e plan
+```
 
-Processa o dataset usando **pandas**. A IA **não faz cálculos** — ela apenas interpreta e comunica. Toda a matemática fica aqui.
+### Atualizacao de dashboard
 
-Operações suportadas: `sum`, `mean`, `count`, `max`, `min`
+```text
+POST /dashboard/refresh/analyze
+  -> busca novamente a fonte de dados
+  -> recalcula plano, graficos e sugestao
+  -> retorna dados para o frontend/API DATABASE salvar via /dashboard/refresh/finish
+```
 
-</details>
+## Estrutura de pastas
 
-<details>
-<summary><strong>generator.py</strong> — Geração de linguagem natural</summary>
+```text
+AI AGENT/
+├── api/
+│   ├── model.py
+│   └── routes.py
+├── app/
+│   ├── accounts_client.py
+│   ├── analyzer.py
+│   ├── data_cleaner.py
+│   ├── data_profiler.py
+│   ├── file_reader.py
+│   ├── generator.py
+│   ├── interpreter.py
+│   ├── manager.py
+│   ├── pandas_tools.py
+│   └── service.py
+├── core/
+│   └── config.py
+├── tests/
+│   └── test_dashboard_prompt_compaction.py
+├── main.py
+├── requirements.txt
+└── README.md
+```
 
-Dois modos de operação:
-- **chat**: responde conversas comuns, sem gráfico
-- **analysis**: explica resultados, gera insights e sugestões
+## Variaveis de ambiente
 
-</details>
+Crie um arquivo `.env` em `core/.env` ou configure as variaveis no ambiente de deploy.
 
-<details>
-<summary><strong>file_reader.py</strong> — Leitor de arquivos</summary>
+| Variavel | Obrigatoria | Padrao | Descricao |
+| --- | --- | --- | --- |
+| `OPENAI_API_KEY` | Sim | - | Chave da OpenAI usada pelo interpreter/generator |
+| `OPENAI_MODEL` | Nao | `gpt-4o-mini` | Modelo usado para interpretacao e geracao |
+| `ACCOUNTS_API_URL` | Sim | - | URL base da API `DATABASE` |
+| `ENV` | Nao | `dev` | Ambiente de execucao |
+| `DEBUG` | Nao | `false` | Habilita informacoes de debug |
+| `TIMEOUT` | Nao | `10` | Timeout padrao para chamadas externas |
+| `MAX_HISTORY_MESSAGES` | Nao | `10` | Limite de mensagens usadas como contexto |
+| `MAX_ROWS` | Nao | `1000` | Limite de linhas considerado nos fluxos legados |
 
-Suporta `.csv`, `.xlsx`, `.xls` e `.json`.  
-Sempre retorna no formato padronizado `list[dict]` usado internamente.
+## Como executar localmente
 
-</details>
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8001
+```
 
----
+No Windows PowerShell:
 
-## 🛠️ Tecnologias
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8001
+```
 
-| Tecnologia | Uso |
-|---|---|
-| **FastAPI** | Framework web assíncrono |
-| **OpenAI API** | Interpretação e geração de linguagem natural |
-| **pandas** | Processamento e agregação de dados |
-| **Pydantic** | Validação de schemas de entrada |
-| **Railway** | Deploy e infraestrutura em nuvem |
-| **JWT** | Autenticação stateless |
-| **Requests** | Integração com API de contas externa |
-| **Python Multipart** | Suporte a upload de arquivos |
+## Rotas
 
----
+### `POST /chat`
 
-## 🌐 Rotas da API
+Conversa com a IA usando o historico de uma conversa salva na API de contas.
 
-**URL Base:** `https://web-production-40ead.up.railway.app`
+Body JSON:
 
----
-
-### `POST /analyze/json`
-
-Conversa ou análise enviando os dados diretamente no body.
-
-**Body:**
 ```json
 {
   "token": "JWT_DO_USUARIO",
   "conversation_id": 1,
-  "question": "qual produto vende mais?",
-  "dataset": [
-    { "produto": "Mouse",   "vendas": 100 },
-    { "produto": "Teclado", "vendas": 200 }
-  ]
+  "question": "Quais insights posso tirar dos meus dados?"
 }
 ```
 
-| Campo | Tipo | Descrição |
-|---|---|---|
-| `token` | string | JWT do usuário |
-| `conversation_id` | int | ID da conversa |
-| `question` | string | Pergunta em linguagem natural |
-| `dataset` | list[dict] | Dados para análise (pode ser vazio) |
+Resposta:
 
-**Resposta:**
 ```json
 {
-  "answer": "O produto Teclado possui maior volume de vendas...",
-  "chart": {
-    "type": "bar",
-    "x": "produto",
-    "y": "vendas",
-    "data": [
-      { "produto": "Mouse",   "vendas": 100 },
-      { "produto": "Teclado", "vendas": 200 }
-    ]
+  "answer": "Resposta em linguagem natural gerada pela IA."
+}
+```
+
+### `POST /dashboard/analyze`
+
+Gera um dashboard completo a partir de uma fonte de dados ja cadastrada na API `DATABASE`.
+
+Content-Type: `multipart/form-data`
+
+Campos:
+
+| Campo | Tipo | Obrigatorio | Descricao |
+| --- | --- | --- | --- |
+| `token` | string | Sim | JWT do usuario |
+| `title` | string | Sim | Nome do dashboard |
+| `prompt` | string | Nao | Instrucao de analise |
+| `data_source_id` | integer | Sim | ID da fonte de dados |
+
+Resposta:
+
+```json
+{
+  "dashboard": {
+    "id": 10,
+    "title": "Vendas por categoria"
   },
-  "interpretation": {
-    "chart_type": "bar",
-    "x": "produto",
-    "y": "vendas",
-    "aggregation": "sum",
-    "mode": "analysis"
-  }
-}
-```
-
----
-
-### `POST /analyze/file`
-
-Análise com upload de arquivo (CSV, Excel ou JSON).
-
-**FormData:**
-
-| Campo | Tipo |
-|---|---|
-| `file` | arquivo (.csv, .xlsx, .xls, .json) |
-| `token` | string |
-| `conversation_id` | int |
-| `question` | string |
-
----
-
-## 💡 Exemplos de uso
-
-### Conversa simples
-
-```javascript
-async function chat() {
-  const response = await fetch(
-    "https://web-production-40ead.up.railway.app/analyze/json",
+  "charts": [
     {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        token: "SEU_JWT",
-        conversation_id: 1,
-        question: "oi",
-        dataset: []
-      })
+      "title": "Receita por categoria",
+      "chart_type": "bar",
+      "x": "categoria",
+      "y": "receita",
+      "data": []
     }
-  );
-
-  const data = await response.json();
-
-  console.log(data);
-}
-
-chat();
-```
-
----
-
-### Análise de vendas por produto
-
-```javascript
-async function analyzeSales() {
-  const response = await fetch(
-    "https://web-production-40ead.up.railway.app/analyze/json",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        token: "SEU_JWT",
-        conversation_id: 1,
-        question: "qual produto vende mais?",
-        dataset: [
-          { produto: "Mouse", vendas: 100 },
-          { produto: "Teclado", vendas: 200 },
-          { produto: "Monitor", vendas: 350 }
-        ]
-      })
-    }
-  );
-
-  const data = await response.json();
-
-  console.log(data);
-}
-
-analyzeSales();
-```
-
----
-
-### Análise via upload de arquivo
-
-```javascript
-async function uploadFile(file) {
-  const formData = new FormData();
-
-  formData.append("file", file);
-  formData.append("token", "SEU_JWT");
-  formData.append("conversation_id", 1);
-  formData.append("question", "qual produto vende mais?");
-
-  const response = await fetch(
-    "https://web-production-40ead.up.railway.app/analyze/file",
-    {
-      method: "POST",
-      body: formData
-    }
-  );
-
-  const data = await response.json();
-
-  console.log(data);
+  ],
+  "ai_suggestion": "Analise textual gerada pela IA.",
+  "plan": {}
 }
 ```
----
 
-## ⚙️ Modos de operação
+### `POST /dashboard/analyze/stream`
 
-### 💬 Modo Chat
+Mesma finalidade de `/dashboard/analyze`, mas responde em `application/x-ndjson` com eventos incrementais.
 
-Ativado quando não há dataset ou a pergunta é uma conversa comum.
+Eventos possiveis:
 
-```
-Entrada:  "oi, tudo bem?"
-Saída:    resposta conversacional, sem gráfico
-```
-
-### 📊 Modo Analysis
-
-Ativado quando há dataset e a pergunta exige análise de dados.
-
-```
-Entrada:  "qual produto tem maior margem de lucro?" + dataset
-Saída:    insight em linguagem natural + estrutura de gráfico
+```json
+{ "type": "status", "message": "Carregando fonte de dados." }
+{ "type": "status", "message": "Gerando graficos e analise com IA." }
+{ "type": "complete", "data": {} }
+{ "type": "error", "message": "Mensagem de erro." }
 ```
 
----
+Use esta rota no frontend quando quiser exibir progresso durante geracoes demoradas.
 
-## 📊 Tipos de gráfico e agregações
+### `POST /dashboard/refresh/analyze`
 
-### Tipos de gráfico
+Recalcula graficos e analise textual para um dashboard existente. A rota nao salva o resultado final; ela retorna a nova analise para ser persistida pela API de contas.
 
-| Tipo | Uso ideal |
-|---|---|
-| `bar` | Ranking e comparação entre categorias |
-| `line` | Evolução temporal de uma métrica |
-| `pie` | Proporção e distribuição percentual |
-| `scatter` | Correlação entre duas variáveis numéricas |
-| `none` | Sem gráfico (modo chat) |
+Content-Type: `multipart/form-data`
 
-### Agregações suportadas
+Campos iguais a `/dashboard/analyze`.
 
-| Tipo | Operação |
-|---|---|
-| `sum` | Soma dos valores |
-| `mean` | Média dos valores |
-| `count` | Contagem de registros |
-| `max` | Maior valor |
-| `min` | Menor valor |
-| `none` | Sem agregação |
+Resposta:
 
----
+```json
+{
+  "charts": [],
+  "ai_suggestion": "Nova analise gerada pela IA.",
+  "plan": {}
+}
+```
 
-## 🖥️ Responsabilidade do frontend
+## Tipos de graficos suportados
 
-A API retorna apenas dados estruturados. Cabe ao frontend:
+O agente trabalha com os seguintes tipos:
 
-- [ ] Enviar a pergunta e o dataset (JSON ou arquivo)
-- [ ] **Renderizar o gráfico** com base no campo `chart` da resposta
-- [ ] Exibir o texto do campo `answer`
-- [ ] Gerenciar autenticação e obter o JWT
+| Tipo | Uso |
+| --- | --- |
+| `bar` | Comparacao entre categorias |
+| `horizontal_bar` | Ranking horizontal |
+| `line` | Serie temporal |
+| `area` | Evolucao acumulada/visual |
+| `pie` | Participacao percentual |
+| `donut` | Participacao percentual em anel |
+| `scatter` | Relacao entre variaveis numericas |
+| `table` | Tabela com linhas do dataset |
+| `kpi` | Indicador numerico |
 
----
+Operacoes de dados comuns:
 
-## 🚀 Evolução futura
+- `groupby`
+- `count`
+- `time_groupby`
+- `scatter`
+- `kpi`
+- `table`
 
-A arquitetura foi projetada para crescer. Próximas possibilidades:
+Agregacoes suportadas:
 
-- 🗄️ **Agentes SQL** — consultas diretas a bancos de dados
-- 📉 **Detecção de anomalias** — identificação de outliers automaticamente
-- 🔮 **Previsões** — modelos de forecasting integrados
-- 🧠 **Memória longa** — contexto persistente entre sessões
-- 📚 **RAG** — respostas baseadas em documentos e bases de conhecimento
-- 📊 **Dashboards inteligentes** — geração automática de painéis
+- `sum`
+- `mean`
+- `count`
+- `max`
+- `min`
+- `median`
+- `none`
 
----
+## Integracao com outros servicos
 
-<div align="center">
+| Servico | Direcao | Finalidade |
+| --- | --- | --- |
+| Frontend React | Recebe chamadas | Chat, criacao e atualizacao de dashboards |
+| API DATABASE | Chamadas de saida | Validar token, buscar fontes, buscar historico e salvar dashboards |
+| OpenAI API | Chamadas de saida | Interpretar prompts e gerar textos |
 
-Feito com ☕ e **FastAPI** · [Voltar ao topo](#-ai-data-analysis-api)
+## Testes
 
-</div>
+Existe teste automatizado para compactacao de prompt de dashboards:
+
+```bash
+pytest
+```
+
+## Observacoes de producao
+
+- A API nao deve receber secrets no body alem do JWT do usuario.
+- O endpoint de streaming deve ser consumido linha a linha como NDJSON.
+- Datasets muito grandes sao compactados antes de serem enviados para IA.
+- Calculos numericos ficam em pandas; a IA decide o plano e explica o resultado.
+- Erros de payload grande sao convertidos em mensagem amigavel para o frontend.
