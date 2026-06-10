@@ -241,9 +241,10 @@ REGRAS:
 - Use kpi para um unico numero importante.
 - Use table quando o usuario pedir detalhes, listagem ou dados brutos.
 - Use pie/donut apenas para composicao percentual com poucas categorias, idealmente entre 2 e 6 valores.
-- Use drill_down_hierarchy quando houver colunas hierarquicas compativeis.
+- Use drill_down_hierarchy somente quando ele melhorar a investigacao do grafico e houver uma hierarquia real.
 - Hierarquias recomendadas: Localizacao Regiao > Estado > Cidade; Tempo Ano > Trimestre > Mes > Dia; Produtos Categoria > Produto.
-- drill_down_hierarchy deve conter apenas colunas reais do schema, na ordem do nivel mais amplo para o mais detalhado.
+- drill_down_hierarchy deve conter apenas colunas reais do schema, na ordem do nivel mais amplo para o mais detalhado, e a primeira coluna precisa ser a mesma usada em x/group_by.
+- Nao use drill_down_hierarchy para graficos de KPI, table, scatter, contagens simples ou comparacoes em que o usuario nao precisa explorar detalhes.
 - Se a hierarquia depender de uma coluna de data unica, use time_column e deixe drill_down_hierarchy vazio.
 - Use apenas colunas existentes no schema.
 - Nunca invente coluna.

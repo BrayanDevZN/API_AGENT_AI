@@ -309,40 +309,6 @@ class Service:
         if len(hierarchy) >= 2:
             return hierarchy
 
-        templates = [
-            [
-                ["regiao", "região", "region"],
-                ["estado", "uf", "state"],
-                ["cidade", "municipio", "city"],
-            ],
-            [
-                ["categoria", "category", "categoria produto"],
-                ["produto", "product", "item", "sku"],
-            ],
-        ]
-
-        for template in templates:
-            inferred = []
-
-            for aliases in template:
-                found = self._find_column_by_aliases(columns, aliases)
-
-                if found:
-                    inferred.append({"column": found, "label": found})
-
-            if len(inferred) >= 2:
-                x_column = chart_plan.get("x")
-                start_index = next(
-                    (
-                        index for index, item in enumerate(inferred)
-                        if self._normalize_name(item["column"]) == self._normalize_name(x_column)
-                    ),
-                    0,
-                )
-
-                sliced = inferred[start_index:]
-
-                return sliced if len(sliced) >= 2 else inferred
 
         return []
 
@@ -361,13 +327,18 @@ class Service:
             return {"enabled": False}
 
         hierarchy = self._normalize_drill_hierarchy(filtered_df, chart_plan)
-        time_column = chart_plan.get("time_column") if chart_plan.get("operation") == "time_groupby" else None
 
-        if len(hierarchy) < 2 and not time_column:
+        if len(hierarchy) < 2:
+            return {"enabled": False}
+
+        if self._normalize_name(hierarchy[0]["column"]) != self._normalize_name(chart_x):
             return {"enabled": False}
 
         metric = chart_plan.get("metric") or []
         metric_column = metric[0] if isinstance(metric, list) and metric else chart_plan.get("y")
+
+        if metric_column and not self._find_column_by_aliases(list(filtered_df.columns), [metric_column]):
+            metric_column = None
 
         rows = filtered_df.head(5000).to_dict(orient="records")
 
@@ -375,7 +346,7 @@ class Service:
             "enabled": True,
             "hierarchy": hierarchy,
             "metric_column": metric_column,
-            "time_column": time_column or chart_x,
+            "time_column": None,
             "rows": self._make_json_safe(rows),
         }
 
