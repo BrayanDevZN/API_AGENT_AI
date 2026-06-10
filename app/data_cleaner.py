@@ -1,20 +1,13 @@
 import pandas as pd
 
+from app.dataframe_io import dataset_to_pandas
+
 
 class DataCleaner:
     def clean(self, dataset: list[dict]) -> pd.DataFrame:
-        df = pd.DataFrame(dataset)
+        df = dataset_to_pandas(dataset, drop_sparse_columns=True)
 
         if df.empty:
-            raise ValueError("Dataset vazio.")
-
-        df.columns = [str(col).strip() for col in df.columns]
-
-        min_non_null = int(len(df) * 0.7)
-        df = df.dropna(axis=1, thresh=min_non_null)
-        df = df.dropna(how="all")
-
-        if df.empty:
-            raise ValueError("Dataset inválido após limpeza.")
+            raise ValueError("Dataset invalido apos limpeza.")
 
         return df

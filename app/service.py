@@ -9,6 +9,7 @@ from app.interpreter import Interpreter
 from app.analyzer import Analyzer
 from app.generator import Generator
 from app.data_cleaner import DataCleaner
+from app.dataframe_io import dataset_to_pandas
 from app.data_profiler import DataProfiler
 from app.pandas_tools import PandasTools
 
@@ -399,9 +400,10 @@ class Service:
         messages = self.accounts.get_user_conversations(token=token)
 
         if dataset:
+            dataset_df = dataset_to_pandas(dataset)
             columns = list(dataset[0].keys())
             unique_values = self.pandas_tools.unique_values(
-                df=pd.DataFrame(dataset),
+                df=dataset_df,
                 columns=columns,
             )
 
