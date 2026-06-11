@@ -744,6 +744,55 @@ Histórico:
 
         return self._best_dimension_column(categorical_columns, avoid=avoid)
 
+    def _display_name(self, column: str | None) -> str:
+        if not column:
+            return ""
+
+        text = str(column).strip()
+        text = text.replace("_", " ").replace("-", " ")
+        text = "".join(
+            f" {char}" if index > 0 and char.isupper() and text[index - 1].islower() else char
+            for index, char in enumerate(text)
+        )
+        words = [word for word in text.split() if word]
+
+        if not words:
+            return str(column).strip()
+
+        special = {
+            "id": "ID",
+            "cpf": "CPF",
+            "cnpj": "CNPJ",
+            "cep": "CEP",
+            "qtd": "Quantidade",
+            "qtde": "Quantidade",
+            "rh": "RH",
+            "roi": "ROI",
+            "ctr": "CTR",
+            "cpc": "CPC",
+            "cpa": "CPA",
+            "sla": "SLA",
+        }
+
+        display_words = []
+
+        for word in words:
+            normalized = self._normalize_name(word)
+            display_words.append(special.get(normalized, word[:1].upper() + word[1:].lower()))
+
+        return " ".join(display_words)
+
+    def _friendly_rename_columns(self, columns: list[str]) -> dict:
+        result = {}
+
+        for column in columns:
+            friendly = self._display_name(column)
+
+            if friendly and friendly != column:
+                result[column] = friendly
+
+        return result
+
     def _metric_from_title(self, title: str, numeric_columns: list[str]) -> str | None:
         normalized_title = self._normalize_name(title)
 
@@ -1584,7 +1633,7 @@ Histórico:
 
         agg_names = {
             "sum": "Total de",
-            "mean": "Média de",
+            "mean": "Media de",
             "max": "Maior valor de",
             "min": "Menor valor de",
             "median": "Mediana de",
@@ -1593,15 +1642,17 @@ Histórico:
         }
 
         prefix = agg_names.get(aggregation, "Total de")
+        metric_name = self._display_name(metric)
+        group_name = self._display_name(group_or_time)
 
         if operation == "time_groupby" and group_or_time:
-            return f"{prefix} {metric} ao longo do tempo"
+            return f"{prefix} {metric_name} ao longo do tempo"
 
         if operation == "groupby" and group_or_time:
-            return f"{prefix} {metric} por {group_or_time}"
+            return f"{prefix} {metric_name} por {group_name}"
 
         if operation == "kpi":
-            return f"{prefix} {metric}"
+            return f"{prefix} {metric_name}"
 
         return title
 
@@ -1636,7 +1687,7 @@ Histórico:
             chart["y"] = "Quantidade"
 
             if not chart.get("title") and chart.get("x"):
-                chart["title"] = f"Quantidade por {chart['x']}"
+                chart["title"] = f"Quantidade por {self._display_name(chart['x'])}"
 
         return chart
 
@@ -1706,7 +1757,7 @@ Histórico:
 
         if main_metric:
             charts.append({
-                "title": f"Total de {main_metric}",
+                "title": f"Total de {self._display_name(main_metric)}",
                 "operation": "kpi",
                 "group_by": [],
                 "metric": [main_metric],
@@ -1723,7 +1774,7 @@ Histórico:
 
         if main_category and main_metric:
             charts.append({
-                "title": f"Total de {main_metric} por {main_category}",
+                "title": f"Total de {self._display_name(main_metric)} por {self._display_name(main_category)}",
                 "operation": "groupby",
                 "group_by": [main_category],
                 "metric": [main_metric],
@@ -1740,7 +1791,7 @@ Histórico:
 
         if main_date and main_metric:
             charts.append({
-                "title": f"Total de {main_metric} ao longo do tempo",
+                "title": f"Total de {self._display_name(main_metric)} ao longo do tempo",
                 "operation": "time_groupby",
                 "group_by": [main_date],
                 "metric": [main_metric],
@@ -1757,7 +1808,7 @@ Histórico:
 
         if main_category:
             charts.append({
-                "title": f"Quantidade por {main_category}",
+                "title": f"Quantidade por {self._display_name(main_category)}",
                 "operation": "count",
                 "group_by": [main_category],
                 "metric": [],
@@ -1774,7 +1825,7 @@ Histórico:
 
         if main_metric and secondary_metric:
             charts.append({
-                "title": f"Relacao entre {main_metric} e {secondary_metric}",
+                "title": f"Relacao entre {self._display_name(main_metric)} e {self._display_name(secondary_metric)}",
                 "operation": "scatter",
                 "group_by": [],
                 "metric": [secondary_metric],
@@ -1791,7 +1842,7 @@ Histórico:
 
         if main_category and not main_metric:
             charts.append({
-                "title": f"Quantidade por {main_category}",
+                "title": f"Quantidade por {self._display_name(main_category)}",
                 "operation": "count",
                 "group_by": [main_category],
                 "metric": [],
@@ -1807,6 +1858,91 @@ Histórico:
             })
 
         return charts
+
+    def _deduplicate_dashboard_charts(self, charts: list[dict]) -> list[dict]:
+        result = []
+        seen_exact = set()
+        used_group_dimensions = {}
+        used_kpis = set()
+        used_relations = set()
+        used_time_series = set()
+
+        for chart in charts:
+            if not isinstance(chart, dict):
+                continue
+
+            operation = chart.get("operation")
+            aggregation = self._as_list(chart.get("aggregation"))
+            group_by = self._as_list(chart.get("group_by"))
+            metric = self._as_list(chart.get("metric"))
+            x = chart.get("x")
+            y = chart.get("y")
+            time_column = chart.get("time_column")
+
+            exact_key = (
+                operation,
+                chart.get("chart_type"),
+                x,
+                y,
+                tuple(group_by),
+                tuple(metric),
+                tuple(aggregation),
+                time_column,
+            )
+
+            if exact_key in seen_exact:
+                continue
+
+            if operation in ["groupby", "count"]:
+                dimension = group_by[0] if group_by else x
+                dimension_key = self._normalize_name(dimension)
+
+                if dimension_key in used_group_dimensions:
+                    existing_index = used_group_dimensions[dimension_key]
+                    existing = result[existing_index]
+
+                    if existing.get("operation") == "count" and operation == "groupby":
+                        result[existing_index] = chart
+                        seen_exact.add(exact_key)
+
+                    continue
+
+                used_group_dimensions[dimension_key] = len(result)
+
+            elif operation == "kpi":
+                metric_key = self._normalize_name(metric[0] if metric else y)
+
+                if metric_key in used_kpis:
+                    continue
+
+                used_kpis.add(metric_key)
+
+            elif operation == "scatter":
+                relation_key = tuple(sorted([
+                    self._normalize_name(x),
+                    self._normalize_name(y),
+                ]))
+
+                if relation_key in used_relations:
+                    continue
+
+                used_relations.add(relation_key)
+
+            elif operation == "time_groupby":
+                time_key = (
+                    self._normalize_name(time_column or x),
+                    self._normalize_name(metric[0] if metric else y),
+                )
+
+                if time_key in used_time_series:
+                    continue
+
+                used_time_series.add(time_key)
+
+            seen_exact.add(exact_key)
+            result.append(chart)
+
+        return result
 
     def _safe_dashboard_plan(self, output_text: str, schema: dict) -> dict:
         columns = self._schema_columns(schema)
@@ -1845,12 +1981,15 @@ Histórico:
             if normalized:
                 charts.append(normalized)
 
+        charts = self._deduplicate_dashboard_charts(charts)
+
         if not charts:
             charts = self._fallback_charts(
                 numeric_columns=numeric_columns,
                 categorical_columns=categorical_columns,
                 date_columns=date_columns,
             )
+            charts = self._deduplicate_dashboard_charts(charts)
 
         if not charts:
             fallback_x = columns[0] if columns else None
@@ -1909,6 +2048,8 @@ Histórico:
             data.get("business_context"),
             dataset_type,
         )
+        rename_columns = self._friendly_rename_columns(columns)
+        rename_columns.update(self._clean_rename_columns(data.get("rename_columns", {}), columns))
 
         return {
             "tool": "dashboard_plan",
@@ -1916,7 +2057,7 @@ Histórico:
             "analysis_type": analysis_type,
             "business_context": business_context,
             "priority_metrics": priority_metrics,
-            "rename_columns": self._clean_rename_columns(data.get("rename_columns", {}), columns),
+            "rename_columns": rename_columns,
             "charts": charts,
 
             "operation": first_chart["operation"],

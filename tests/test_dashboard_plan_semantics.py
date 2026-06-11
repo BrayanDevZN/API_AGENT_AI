@@ -60,6 +60,88 @@ class DashboardPlanSemanticsTest(unittest.TestCase):
         self.assertIn("Valor", chart["title"])
         self.assertIn("Categoria", chart["title"])
 
+    def test_deduplicates_repeated_dimension_and_friendly_titles(self):
+        interpreter = self.make_interpreter()
+        schema = {
+            "columns": [
+                {"name": "Status", "dtype": "String"},
+                {"name": "Nota_Entrevista", "dtype": "Float64"},
+                {"name": "Pretensao_Salarial", "dtype": "Float64"},
+            ],
+            "numeric_columns": ["Nota_Entrevista", "Pretensao_Salarial"],
+            "categorical_columns": ["Status"],
+            "date_columns": [],
+        }
+        output = {
+            "tool": "dashboard_plan",
+            "dataset_type": "rh",
+            "analysis_type": "general",
+            "business_context": "RH",
+            "priority_metrics": ["Nota_Entrevista", "Pretensao_Salarial"],
+            "rename_columns": {},
+            "charts": [
+                {
+                    "title": "Quantidade por Status",
+                    "operation": "count",
+                    "chart_type": "bar",
+                    "group_by": ["Status"],
+                    "metric": [],
+                    "aggregation": ["count"],
+                    "x": "Status",
+                    "y": "Quantidade",
+                    "time_column": None,
+                    "time_freq": "M",
+                    "drill_down_hierarchy": [],
+                    "filters": [],
+                    "limit": 10,
+                    "sort": "desc",
+                    "reason": "Contagem por status",
+                },
+                {
+                    "title": "Total de Nota_Entrevista por Status",
+                    "operation": "groupby",
+                    "chart_type": "horizontal_bar",
+                    "group_by": ["Status"],
+                    "metric": ["Nota_Entrevista"],
+                    "aggregation": ["mean"],
+                    "x": "Status",
+                    "y": "Nota_Entrevista",
+                    "time_column": None,
+                    "time_freq": "M",
+                    "drill_down_hierarchy": [],
+                    "filters": [],
+                    "limit": 10,
+                    "sort": "desc",
+                    "reason": "Nota por status",
+                },
+                {
+                    "title": "Total de Pretensao_Salarial por Status",
+                    "operation": "groupby",
+                    "chart_type": "bar",
+                    "group_by": ["Status"],
+                    "metric": ["Pretensao_Salarial"],
+                    "aggregation": ["sum"],
+                    "x": "Status",
+                    "y": "Pretensao_Salarial",
+                    "time_column": None,
+                    "time_freq": "M",
+                    "drill_down_hierarchy": [],
+                    "filters": [],
+                    "limit": 10,
+                    "sort": "desc",
+                    "reason": "Pretensao por status",
+                },
+            ],
+        }
+
+        plan = interpreter._safe_dashboard_plan(json.dumps(output), schema)
+
+        self.assertEqual(len(plan["charts"]), 1)
+        self.assertEqual(plan["charts"][0]["metric"], ["Nota_Entrevista"])
+        self.assertEqual(plan["charts"][0]["title"], "Media de Nota Entrevista por Status")
+        self.assertEqual(plan["rename_columns"]["Nota_Entrevista"], "Nota Entrevista")
+        self.assertEqual(plan["rename_columns"]["Pretensao_Salarial"], "Pretensao Salarial")
+
 
 if __name__ == "__main__":
     unittest.main()
