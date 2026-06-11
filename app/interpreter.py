@@ -1297,7 +1297,7 @@ Histórico:
         Em gráficos de contagem, o dado agregado final deve usar a mesma chave
         que o frontend vai procurar no chart_data.
 
-        O pandas/analyzer normalmente gera algo como:
+        O Polars/analyzer normalmente gera algo como:
         {"Região": "Sudeste", "Quantidade": 120}
 
         Então chart_config.y não pode ser "count", porque essa chave não existe

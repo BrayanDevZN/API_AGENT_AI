@@ -1,20 +1,26 @@
-import pandas as pd
+import polars as pl
 
 
 class DataCleaner:
-    def clean(self, dataset: list[dict]) -> pd.DataFrame:
-        df = pd.DataFrame(dataset)
+    def clean(self, dataset: list[dict]) -> pl.DataFrame:
+        df = pl.from_dicts(dataset, infer_schema_length=None)
 
-        if df.empty:
+        if df.is_empty():
             raise ValueError("Dataset vazio.")
 
         df.columns = [str(col).strip() for col in df.columns]
 
-        min_non_null = int(len(df) * 0.7)
-        df = df.dropna(axis=1, thresh=min_non_null)
-        df = df.dropna(how="all")
+        min_non_null = int(df.height * 0.7)
+        kept_columns = [
+            column for column in df.columns
+            if df.height - df[column].null_count() >= min_non_null
+        ]
+        df = df.select(kept_columns)
 
-        if df.empty:
-            raise ValueError("Dataset inválido após limpeza.")
+        if df.width:
+            df = df.filter(~pl.all_horizontal(pl.all().is_null()))
+
+        if df.is_empty():
+            raise ValueError("Dataset invalido apos limpeza.")
 
         return df

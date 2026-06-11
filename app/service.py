@@ -1,8 +1,9 @@
 import json
+import math
 import unicodedata
 from datetime import date, datetime
 
-import pandas as pd
+import polars as pl
 
 from app.accounts_client import AccountsClient
 from app.interpreter import Interpreter
@@ -10,7 +11,7 @@ from app.analyzer import Analyzer
 from app.generator import Generator
 from app.data_cleaner import DataCleaner
 from app.data_profiler import DataProfiler
-from app.pandas_tools import PandasTools
+from app.polars_tools import PolarsTools
 
 
 AI_PAYLOAD_MAX_CHARS = 700_000
@@ -28,7 +29,7 @@ class Service:
         self.generator = Generator()
         self.cleaner = DataCleaner()
         self.profiler = DataProfiler()
-        self.pandas_tools = PandasTools()
+        self.polars_tools = PolarsTools()
 
     def _normalize_prompt(self, prompt: str | None) -> str | None:
         if not prompt:
@@ -54,25 +55,18 @@ class Service:
         if isinstance(value, tuple):
             return [self._make_json_safe(item) for item in value]
 
-        if isinstance(value, pd.Timestamp):
-            return value.isoformat()
-
-        if isinstance(value, pd.Period):
-            return str(value)
-
         if isinstance(value, (datetime, date)):
             return value.isoformat()
 
-        if not isinstance(value, (list, dict, tuple, str)):
-            try:
-                if pd.isna(value):
-                    return None
-            except Exception:
-                pass
+        if value is None:
+            return None
+
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            return None
 
         if hasattr(value, "item"):
             try:
-                return value.item()
+                return self._make_json_safe(value.item())
             except Exception:
                 return value
 
@@ -295,7 +289,7 @@ class Service:
 
         return None
 
-    def _normalize_drill_hierarchy(self, df: pd.DataFrame, chart_plan: dict) -> list[dict]:
+    def _normalize_drill_hierarchy(self, df: pl.DataFrame, chart_plan: dict) -> list[dict]:
         columns = [str(column) for column in df.columns]
         requested = chart_plan.get("drill_down_hierarchy") or []
         hierarchy = []
@@ -312,18 +306,18 @@ class Service:
 
         return []
 
-    def _build_drill_down_config(self, df: pd.DataFrame, chart_plan: dict, chart_x: str | None) -> dict:
+    def _build_drill_down_config(self, df: pl.DataFrame, chart_plan: dict, chart_x: str | None) -> dict:
         chart_type = chart_plan.get("chart_type")
 
         if chart_type not in ["bar", "horizontal_bar", "line", "area", "pie", "donut", "scatter"]:
             return {"enabled": False}
 
-        filtered_df = self.pandas_tools.filter_dataframe(
+        filtered_df = self.polars_tools.filter_dataframe(
             df=df,
             filters=chart_plan.get("filters") or [],
         )
 
-        if filtered_df.empty:
+        if filtered_df.is_empty():
             return {"enabled": False}
 
         hierarchy = self._normalize_drill_hierarchy(filtered_df, chart_plan)
@@ -340,7 +334,7 @@ class Service:
         if metric_column and not self._find_column_by_aliases(list(filtered_df.columns), [metric_column]):
             metric_column = None
 
-        rows = filtered_df.head(5000).to_dict(orient="records")
+        rows = filtered_df.head(5000).to_dicts()
 
         return {
             "enabled": True,
@@ -371,8 +365,8 @@ class Service:
 
         if dataset:
             columns = list(dataset[0].keys())
-            unique_values = self.pandas_tools.unique_values(
-                df=pd.DataFrame(dataset),
+            unique_values = self.polars_tools.unique_values(
+                df=pl.from_dicts(dataset, infer_schema_length=None),
                 columns=columns,
             )
 
@@ -463,11 +457,11 @@ class Service:
 
         df = self.cleaner.clean(dataset)
 
-        if df.empty:
+        if df.is_empty():
             raise ValueError("Dataset sem dados após limpeza.")
 
         schema = self.profiler.profile(df)
-        schema["unique_values"] = self.pandas_tools.unique_values(
+        schema["unique_values"] = self.polars_tools.unique_values(
             df=df,
             columns=schema.get("categorical_columns", []),
             limit=AI_UNIQUE_VALUES_LIMIT,
@@ -496,7 +490,7 @@ class Service:
         for index, chart_plan in enumerate(chart_plans):
             operation = chart_plan.get("operation")
 
-            metrics = self.pandas_tools.execute(
+            metrics = self.polars_tools.execute(
                 df=df,
                 plan=chart_plan,
             )

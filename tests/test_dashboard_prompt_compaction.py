@@ -2,7 +2,7 @@ import unittest
 
 from app.data_cleaner import DataCleaner
 from app.data_profiler import DataProfiler
-from app.pandas_tools import PandasTools
+from app.polars_tools import PolarsTools
 from app.service import Service, AI_UNIQUE_VALUES_LIMIT
 
 
@@ -67,7 +67,7 @@ class DashboardPromptCompactionTest(unittest.TestCase):
         service.generator = FakeGenerator()
         service.cleaner = DataCleaner()
         service.profiler = DataProfiler()
-        service.pandas_tools = PandasTools()
+        service.polars_tools = PolarsTools()
         return service
 
     def test_large_dashboard_payload_is_compacted_only_for_ai(self):

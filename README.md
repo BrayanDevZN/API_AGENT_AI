@@ -1,6 +1,6 @@
 # DataPilot AI Agent API
 
-API responsavel pela camada inteligente do DataPilot. Ela recebe perguntas do usuario, consulta a API de contas para validar identidade e historico, interpreta datasets com apoio de IA, executa transformacoes com pandas e devolve respostas, graficos e sugestoes analiticas para o frontend.
+API responsavel pela camada inteligente do DataPilot. Ela recebe perguntas do usuario, consulta a API de contas para validar identidade e historico, interpreta datasets com apoio de IA, executa transformacoes com Polars e devolve respostas, graficos e sugestoes analiticas para o frontend.
 
 ## Visao geral
 
@@ -11,7 +11,7 @@ O `AI AGENT` e o servico de inteligencia da plataforma. Ele nao armazena usuario
 - interpreta prompts de chat e de dashboard;
 - limpa e perfila dados tabulares;
 - gera planos de graficos com IA;
-- executa agregacoes de dados com pandas;
+- executa agregacoes de dados com Polars;
 - cria insights em linguagem natural;
 - chama a API de contas para salvar dashboards gerados.
 
@@ -24,7 +24,7 @@ O `AI AGENT` e o servico de inteligencia da plataforma. Ele nao armazena usuario
 | Uvicorn | Servidor ASGI usado em desenvolvimento e deploy |
 | Pydantic | Schemas de request/response |
 | OpenAI API | Interpretacao de prompts e geracao de textos analiticos |
-| pandas | Limpeza, agrupamento, agregacao e preparacao dos dados |
+| Polars | Limpeza, agrupamento, agregacao e preparacao dos dados |
 | python-dotenv | Carregamento de configuracoes locais |
 | requests | Integracao com a API de contas/dados |
 | StreamingResponse | Resposta incremental em NDJSON para status de geracao |
@@ -47,7 +47,7 @@ app/service.py
       +--> app/interpreter.py      -> OpenAI interpreta pedido/plano
       +--> app/data_cleaner.py     -> Normalizacao do dataset
       +--> app/data_profiler.py    -> Perfil das colunas
-      +--> app/pandas_tools.py     -> Operacoes tabulares
+      +--> app/polars_tools.py     -> Operacoes tabulares
       +--> app/analyzer.py         -> Graficos simples/legados
       +--> app/generator.py        -> Respostas e insights
 ```
@@ -56,12 +56,12 @@ app/service.py
 
 | Camada | Arquivos | Responsabilidade |
 | --- | --- | --- |
-| Entrada HTTP | `api/routes.py` | Expõe rotas, recebe JSON/FormData, trata erros e retorna respostas HTTP |
+| Entrada HTTP | `api/routes.py` | ExpÃƒÂµe rotas, recebe JSON/FormData, trata erros e retorna respostas HTTP |
 | Schemas | `api/model.py` | Define contratos Pydantic para chat e dashboards |
-| Orquestracao | `app/manager.py`, `app/service.py` | Coordena validacao, historico, IA, pandas e persistencia externa |
+| Orquestracao | `app/manager.py`, `app/service.py` | Coordena validacao, historico, IA, Polars e persistencia externa |
 | Integracao externa | `app/accounts_client.py` | Chama a API `DATABASE` para validar token, buscar fontes e salvar dashboards |
 | Inteligencia | `app/interpreter.py`, `app/generator.py` | Usa OpenAI para interpretar prompts e gerar analises |
-| Dados | `app/data_cleaner.py`, `app/data_profiler.py`, `app/pandas_tools.py`, `app/analyzer.py` | Limpa, descreve, agrega e estrutura dados para graficos |
+| Dados | `app/data_cleaner.py`, `app/data_profiler.py`, `app/polars_tools.py`, `app/analyzer.py` | Limpa, descreve, agrega e estrutura dados para graficos |
 | Configuracao | `core/config.py` | Carrega variaveis de ambiente |
 
 ## Fluxos principais
@@ -84,7 +84,7 @@ POST /dashboard/analyze
   -> busca a fonte de dados na API DATABASE
   -> limpa e perfila o dataset
   -> cria plano de graficos com IA
-  -> executa agregacoes com pandas
+  -> executa agregacoes com Polars
   -> gera analise textual
   -> salva dashboard e graficos na API DATABASE
   -> retorna dashboard, charts, ai_suggestion e plan
@@ -103,27 +103,27 @@ POST /dashboard/refresh/analyze
 
 ```text
 AI AGENT/
-├── api/
-│   ├── model.py
-│   └── routes.py
-├── app/
-│   ├── accounts_client.py
-│   ├── analyzer.py
-│   ├── data_cleaner.py
-│   ├── data_profiler.py
-│   ├── file_reader.py
-│   ├── generator.py
-│   ├── interpreter.py
-│   ├── manager.py
-│   ├── pandas_tools.py
-│   └── service.py
-├── core/
-│   └── config.py
-├── tests/
-│   └── test_dashboard_prompt_compaction.py
-├── main.py
-├── requirements.txt
-└── README.md
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ api/
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ model.py
+Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ routes.py
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ app/
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ accounts_client.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ analyzer.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ data_cleaner.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ data_profiler.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ file_reader.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ generator.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ interpreter.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ manager.py
+Ã¢â€â€š   Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ polars_tools.py
+Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ service.py
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ core/
+Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ config.py
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ tests/
+Ã¢â€â€š   Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ test_dashboard_prompt_compaction.py
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ main.py
+Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ requirements.txt
+Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ README.md
 ```
 
 ## Variaveis de ambiente
@@ -309,5 +309,5 @@ pytest
 - A API nao deve receber secrets no body alem do JWT do usuario.
 - O endpoint de streaming deve ser consumido linha a linha como NDJSON.
 - Datasets muito grandes sao compactados antes de serem enviados para IA.
-- Calculos numericos ficam em pandas; a IA decide o plano e explica o resultado.
+- Calculos numericos ficam em Polars; a IA decide o plano e explica o resultado.
 - Erros de payload grande sao convertidos em mensagem amigavel para o frontend.
