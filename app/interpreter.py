@@ -149,6 +149,106 @@ class Interpreter:
         ],
     }
 
+    BUSINESS_METRIC_TERMS = [
+        "receita",
+        "faturamento",
+        "valor",
+        "total",
+        "venda",
+        "vendas",
+        "lucro",
+        "margem",
+        "custo",
+        "despesa",
+        "saldo",
+        "quantidade",
+        "qtd",
+        "pedido",
+        "pedidos",
+        "cliente",
+        "clientes",
+        "clique",
+        "cliques",
+        "click",
+        "impress",
+        "convers",
+        "investimento",
+        "roi",
+        "ctr",
+        "cpc",
+        "cpa",
+        "ticket",
+        "nota",
+        "satisfacao",
+        "satisfacao",
+        "tempo",
+        "duracao",
+        "idade",
+        "salario",
+        "score",
+    ]
+
+    BUSINESS_DIMENSION_TERMS = [
+        "categoria",
+        "produto",
+        "servico",
+        "campanha",
+        "canal",
+        "origem",
+        "midia",
+        "cliente",
+        "segmento",
+        "status",
+        "situacao",
+        "regiao",
+        "estado",
+        "cidade",
+        "pais",
+        "departamento",
+        "cargo",
+        "equipe",
+        "vendedor",
+        "loja",
+        "marca",
+        "tipo",
+        "etapa",
+        "prioridade",
+        "plano",
+        "forma",
+        "metodo",
+    ]
+
+    LOW_VALUE_COLUMN_TERMS = [
+        "id",
+        "uuid",
+        "guid",
+        "codigo",
+        "cod",
+        "sku",
+        "hash",
+        "token",
+        "email",
+        "e-mail",
+        "telefone",
+        "phone",
+        "celular",
+        "cpf",
+        "cnpj",
+        "cep",
+        "url",
+        "link",
+        "imagem",
+        "foto",
+        "avatar",
+        "descricao",
+        "descrição",
+        "observacao",
+        "observação",
+        "comentario",
+        "comentário",
+        "texto",
+    ]
+
     def __init__(self):
         self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
         self.model = Settings.OPENAI_MODEL
@@ -217,12 +317,24 @@ FORMATO:
 
 REGRAS:
 - Pense como um analista de dados montando um dashboard executivo, nao como alguem preenchendo espaco com graficos.
+- Antes de escolher qualquer grafico, leia o NOME de cada coluna e classifique mentalmente:
+  * metricas: valores numericos de negocio, como receita, valor, quantidade, lucro, custo, cliques, conversoes, nota, tempo ou score.
+  * dimensoes: colunas que explicam a variacao, como categoria, produto, canal, campanha, status, regiao, cidade, cliente, departamento ou vendedor.
+  * colunas tecnicas: id, codigo, uuid, email, telefone, url, texto longo, descricao, imagem ou hash.
+- Graficos devem nascer dessa classificacao. Nao escolha operacao aleatoria.
+- Para cada grafico, escolha uma coluna que faça sentido para o papel dela: group_by/x precisa ser dimensao interpretavel; metric/y precisa ser metrica numerica de negocio.
+- Se a unica coluna numerica for um ID/codigo, nao trate como metrica; prefira contagem por uma dimensao util.
+- Se a unica coluna categorica for texto tecnico, email, url, codigo ou descricao longa, nao use ranking dela; prefira KPI/count geral ou tabela curta.
+- O titulo deve dizer exatamente o que foi calculado e com quais colunas. Exemplo: se metric = "Valor" e group_by = "Categoria", titulo como "Total de Valor por Categoria".
+- Se o titulo sugerir uma metrica que nao existe no schema, troque o titulo ou troque a metrica para uma coluna real equivalente.
+- reason deve justificar a escolha da coluna e a pergunta respondida, por exemplo: "Compara a receita total entre categorias de produto".
 - Priorize perguntas de negocio: tamanho do resultado, principais drivers, evolucao no tempo, concentracao por categoria, desempenho por segmento e possiveis outliers.
 - Para analise geral, monte uma narrativa visual com esta ordem quando houver colunas compativeis: 1 KPI principal, 1 ranking por dimensao relevante, 1 evolucao temporal, 1 composicao percentual somente se fizer sentido, 1 relacao entre metricas numericas e 1 tabela curta apenas se ela ajudar a investigar detalhes.
 - Escolha metricas que representem resultado ou volume real. Exemplos: receita, valor, vendas, pedidos, lucro, custo, investimento, conversoes, cliques, quantidade, tempo, nota ou satisfacao.
 - Escolha dimensoes que expliquem variacao. Exemplos: produto, categoria, canal, campanha, regiao, cidade, cliente, status, departamento, cargo, vendedor ou etapa.
 - Evite graficos decorativos, repetidos ou obvios. Nao crie dois rankings quase iguais mudando apenas o titulo.
 - Evite usar IDs, codigos, emails, telefones, URLs, nomes muito unicos ou textos longos como dimensao principal, a menos que o usuario peca detalhes.
+- Nunca use ID/codigo/telefone/email/url como metric. Use essas colunas apenas em tabela de detalhes quando o usuario pedir.
 - Nao use tabela como primeiro grafico em analise geral se houver metricas numericas e categorias uteis.
 - Para datasets grandes, prefira agregacoes, rankings top N, KPIs e series temporais em vez de dados brutos.
 - Se existir coluna temporal e metrica numerica relevante, inclua uma tendencia temporal.
@@ -511,6 +623,127 @@ Histórico:
 
         return columns[0]
 
+    def _contains_term(self, column: str | None, terms: list[str]) -> bool:
+        normalized = self._normalize_name(column or "").replace("_", " ")
+        compact = normalized.replace(" ", "")
+
+        for term in terms:
+            clean_term = self._normalize_name(term).replace("_", " ")
+            clean_compact = clean_term.replace(" ", "")
+
+            if (
+                normalized == clean_term
+                or compact == clean_compact
+                or clean_term in normalized
+                or clean_compact in compact
+            ):
+                return True
+
+        return False
+
+    def _is_low_value_column(self, column: str | None) -> bool:
+        if not column:
+            return False
+
+        normalized = self._normalize_name(column).replace("_", " ")
+        tokens = [token for token in normalized.replace("-", " ").split() if token]
+
+        if normalized in ["id", "codigo", "cod", "uuid", "guid"]:
+            return True
+
+        if tokens and tokens[-1] in ["id", "uuid", "guid", "codigo", "cod"]:
+            return True
+
+        return self._contains_term(column, self.LOW_VALUE_COLUMN_TERMS)
+
+    def _metric_score(self, column: str | None) -> int:
+        if not column:
+            return -100
+
+        score = 0
+
+        if self._contains_term(column, self.BUSINESS_METRIC_TERMS):
+            score += 8
+
+        if self._contains_term(column, self.BUSINESS_DIMENSION_TERMS):
+            score -= 3
+
+        if self._is_low_value_column(column):
+            score -= 12
+
+        return score
+
+    def _dimension_score(self, column: str | None) -> int:
+        if not column:
+            return -100
+
+        score = 0
+
+        if self._contains_term(column, self.BUSINESS_DIMENSION_TERMS):
+            score += 8
+
+        if self._contains_term(column, self.BUSINESS_METRIC_TERMS):
+            score -= 3
+
+        if self._is_low_value_column(column):
+            score -= 12
+
+        return score
+
+    def _best_metric_column(self, columns: list[str], avoid: str | None = None) -> str | None:
+        candidates = [column for column in columns if column and column != avoid]
+
+        if not candidates:
+            return None
+
+        return sorted(
+            candidates,
+            key=lambda column: (self._metric_score(column), -candidates.index(column)),
+            reverse=True,
+        )[0]
+
+    def _best_dimension_column(self, columns: list[str], avoid: str | None = None) -> str | None:
+        candidates = [column for column in columns if column and column != avoid]
+
+        if not candidates:
+            return None
+
+        useful = [
+            column for column in candidates
+            if not self._is_low_value_column(column)
+        ]
+
+        if useful:
+            candidates = useful
+
+        return sorted(
+            candidates,
+            key=lambda column: (self._dimension_score(column), -candidates.index(column)),
+            reverse=True,
+        )[0]
+
+    def _sanitize_metric_choice(
+        self,
+        requested: str | None,
+        numeric_columns: list[str],
+        avoid: str | None = None,
+    ) -> str | None:
+        if requested in numeric_columns and requested != avoid and not self._is_low_value_column(requested):
+            return requested
+
+        return self._best_metric_column(numeric_columns, avoid=avoid)
+
+    def _sanitize_dimension_choice(
+        self,
+        requested: str | None,
+        categorical_columns: list[str],
+        avoid: str | None = None,
+    ) -> str | None:
+        if requested in categorical_columns and requested != avoid and not self._is_low_value_column(requested):
+            return requested
+
+        return self._best_dimension_column(categorical_columns, avoid=avoid)
+
     def _metric_from_title(self, title: str, numeric_columns: list[str]) -> str | None:
         normalized_title = self._normalize_name(title)
 
@@ -753,7 +986,8 @@ Histórico:
             if column != metric
         ]
 
-        return self._preferred_column(candidates, preferred_names)
+        preferred = self._preferred_column(candidates, preferred_names)
+        return self._sanitize_dimension_choice(preferred, candidates, avoid=metric)
 
     def _preferred_metric_column_for_group(
         self,
@@ -785,7 +1019,8 @@ Histórico:
             if column != group_by
         ]
 
-        return self._preferred_column(candidates, preferred_names)
+        preferred = self._preferred_column(candidates, preferred_names)
+        return self._sanitize_metric_choice(preferred, candidates, avoid=group_by)
 
     def _fix_same_group_metric(
         self,
@@ -1077,8 +1312,29 @@ Histórico:
             ],
         )
 
+        preferred_category = self._sanitize_dimension_choice(
+            preferred_category,
+            categorical_columns,
+            avoid=metric or y,
+        )
+        preferred_metric = self._sanitize_metric_choice(
+            preferred_metric,
+            numeric_columns,
+            avoid=group_by or x,
+        )
+        semantic_category = self._sanitize_dimension_choice(
+            title_category or group_by or x or preferred_category,
+            categorical_columns,
+            avoid=metric or y,
+        )
+        semantic_metric = self._sanitize_metric_choice(
+            title_metric or metric or y or preferred_metric,
+            numeric_columns,
+            avoid=group_by or x,
+        )
+
         if operation == "kpi":
-            metric = title_metric or metric or y or preferred_metric
+            metric = semantic_metric
 
             if not metric:
                 return None
@@ -1097,12 +1353,16 @@ Histórico:
 
         elif operation == "scatter":
             nums = []
+            usable_numeric_columns = [
+                column for column in numeric_columns
+                if not self._is_low_value_column(column)
+            ] or numeric_columns
 
             for col in [x, y, metric]:
-                if col in numeric_columns and col not in nums:
+                if col in usable_numeric_columns and col not in nums:
                     nums.append(col)
 
-            for col in numeric_columns:
+            for col in usable_numeric_columns:
                 if col not in nums:
                     nums.append(col)
 
@@ -1124,7 +1384,11 @@ Histórico:
             if time_column not in date_columns:
                 return None
 
-            metric = title_metric or metric or y or preferred_metric
+            metric = self._sanitize_metric_choice(
+                title_metric or metric or y or semantic_metric,
+                numeric_columns,
+                avoid=time_column,
+            )
 
             if metric:
                 metric_list = [metric]
@@ -1146,7 +1410,7 @@ Histórico:
             title = self._coherent_title(title, operation, metric or "Registros", time_column, aggregation[0])
 
         elif operation == "count":
-            group_by = title_category or group_by or x or preferred_category
+            group_by = semantic_category
 
             if not group_by:
                 return None
@@ -1162,8 +1426,8 @@ Histórico:
 
         elif operation == "table":
             chart_type = "table"
-            group_by = title_category or group_by or x or preferred_category
-            metric = title_metric or metric or y or preferred_metric
+            group_by = semantic_category
+            metric = semantic_metric
 
             if not group_by and not metric:
                 return None
@@ -1176,8 +1440,12 @@ Histórico:
 
         else:
             operation = "groupby"
-            group_by = title_category or group_by or x or preferred_category
-            metric = title_metric or metric or y or preferred_metric
+            group_by = semantic_category
+            metric = self._sanitize_metric_choice(
+                title_metric or metric or y or semantic_metric,
+                numeric_columns,
+                avoid=group_by,
+            )
 
             if not group_by:
                 return None
@@ -1238,6 +1506,51 @@ Histórico:
                     )
                 else:
                     return None
+
+        if operation == "groupby":
+            final_group = group_by_list[0] if group_by_list else None
+            final_metric = metric_list[0] if metric_list else None
+
+            if (
+                final_group not in categorical_columns
+                or final_metric not in numeric_columns
+                or self._is_low_value_column(final_group)
+                or self._is_low_value_column(final_metric)
+            ):
+                return None
+
+        if operation == "count":
+            final_group = group_by_list[0] if group_by_list else None
+
+            if final_group not in categorical_columns or self._is_low_value_column(final_group):
+                return None
+
+        if operation == "scatter" and (
+            x not in numeric_columns
+            or y not in numeric_columns
+            or self._is_low_value_column(x)
+            or self._is_low_value_column(y)
+        ):
+            return None
+
+        if operation == "kpi" and (
+            not metric_list
+            or metric_list[0] not in numeric_columns
+            or self._is_low_value_column(metric_list[0])
+        ):
+            return None
+
+        if operation == "time_groupby":
+            final_metric = metric_list[0] if metric_list else None
+
+            if time_column not in date_columns:
+                return None
+
+            if final_metric and (
+                final_metric not in numeric_columns
+                or self._is_low_value_column(final_metric)
+            ):
+                return None
 
         if x and y and x == y and operation not in ["scatter", "kpi"]:
             return None
@@ -1380,6 +1693,16 @@ Histórico:
             date_columns,
             ["data", "date", "dia", "mes", "ano"],
         )
+
+        main_metric = self._sanitize_metric_choice(main_metric, numeric_columns)
+        secondary_metric = self._sanitize_metric_choice(
+            secondary_metric,
+            [
+                column for column in numeric_columns
+                if column != main_metric
+            ],
+        )
+        main_category = self._sanitize_dimension_choice(main_category, categorical_columns)
 
         if main_metric:
             charts.append({
