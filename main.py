@@ -12,13 +12,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://datapilotplataform.com",
-        "https://www.datapilotplataform.com",
-        Settings().ACCOUNTS_API_URL,
-    ],
+    allow_origins=Settings().CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

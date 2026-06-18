@@ -14,6 +14,14 @@ class Settings:
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     ACCOUNTS_API_URL: str = os.getenv("ACCOUNTS_API_URL")
+    CORS_ALLOWED_ORIGINS: list[str] = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173,https://datapilotplataform.com,https://www.datapilotplataform.com",
+        ).split(",")
+        if origin.strip()
+    ]
 
     ENV: str = os.getenv("ENV", "dev")
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"

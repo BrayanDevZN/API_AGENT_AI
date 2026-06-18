@@ -39,7 +39,10 @@ def format_error(error: Exception) -> str:
             "Gere com um prompt mais específico ou reduza a fonte."
         )
 
-    return f"{type(error).__name__}: {str(error)}"
+    if isinstance(error, ValueError):
+        return raw_message
+
+    return "Nao foi possivel concluir a analise. Tente novamente em instantes."
 
 
 def get_dashboard_data(
