@@ -18,7 +18,7 @@ class Settings:
         origin.strip()
         for origin in os.getenv(
             "CORS_ALLOWED_ORIGINS",
-            "http://localhost:5173,http://127.0.0.1:5173,https://datapilotplataform.com,https://www.datapilotplataform.com",
+            "http://localhost:5173,http://127.0.0.1:5173,https://datapilotplatform.com,https://www.datapilotplatform.com,http://datapilotplatform.com,http://www.datapilotplatform.com,https://datapilotplataform.com,https://www.datapilotplataform.com,http://datapilotplataform.com,http://www.datapilotplataform.com",
         ).split(",")
         if origin.strip()
     ]
